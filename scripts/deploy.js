@@ -29,6 +29,25 @@ async function main() {
   console.log(`AI agent: ${agent}`);
   console.log(`BayanihaiEscrow deployed to ${address} on ${network.name}`);
   console.log(`Wrote ${path.relative(process.cwd(), out)}`);
+
+  if (network.name === "bscTestnet") {
+    // Everything needed for "Verify and Publish" on testnet.bscscan.com (no API key needed).
+    const ctorArgs = ethers.AbiCoder.defaultAbiCoder().encode(["address"], [agent]).slice(2);
+    const lines = [
+      `Contract address:   ${address}`,
+      `Open:               https://testnet.bscscan.com/verifyContract?a=${address}`,
+      `Compiler type:      Solidity (Single file)`,
+      `Compiler version:   v0.8.24 (pick the +commit entry for 0.8.24)`,
+      `License:            MIT`,
+      `Optimization:       Yes, 200 runs`,
+      `EVM version:        paris`,
+      `Source code:        paste verify/BayanihaiEscrow.flat.sol`,
+      `Constructor args:   ${ctorArgs}`,
+    ];
+    fs.writeFileSync(path.join(__dirname, "..", "verify", "bscscan-settings.txt"), lines.join("\n") + "\n");
+    console.log("\nBscScan verification settings (also saved to verify/bscscan-settings.txt):");
+    console.log(lines.join("\n"));
+  }
 }
 
 main().catch((e) => {

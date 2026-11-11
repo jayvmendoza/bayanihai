@@ -75,10 +75,12 @@ async function handle(s: State, body: Body): Promise<void> {
     case "deal-maker": {
       const scenario = body.scenario === "fail" ? "fail" : "success";
       const c = escrow(wallet("agent"));
-      for (const g of groupByPickup(s.preorders)) {
-        if (s.deals.some((d) => d.pickup === g.pickup)) continue;
+      // Review all open groups at the same time (Gemini calls can take a few seconds each).
+      const pending = groupByPickup(s.preorders).filter((g) => !s.deals.some((d) => d.pickup === g.pickup));
+      const decisions = await Promise.all(pending.map((g) => reviewGroup(g)));
 
-        const ai = await reviewGroup(g);
+      for (const [i, g] of pending.entries()) {
+        const ai = decisions[i];
         s.reviews.push({ pickup: g.pickup, totalKg: g.totalKg, buyerCount: g.buyerCount, ai, at: new Date().toISOString() });
         addLog(s, `AI (${ai.source}) reviewed ${g.pickup}: ${ai.create_deal ? "CREATE DEAL" : "WAIT"}. ${ai.reason}`);
         if (!ai.create_deal) continue;

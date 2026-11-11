@@ -40,34 +40,48 @@ function buildPrompt(g: Group, rules: AiDecision): string {
   ].join("\n");
 }
 
+// Primary model first, then lighter backups if Gemini is busy (503/429) or slow.
+function modelsToTry(): string[] {
+  const primary = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+  return [...new Set([primary, "gemini-3.5-flash", "gemini-3.1-flash-lite"])];
+}
+
+async function askGemini(model: string, key: string, prompt: string): Promise<Partial<AiDecision>> {
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
+    }),
+    signal: AbortSignal.timeout(25000),
+  });
+  if (!res.ok) throw new Error(`${model}: HTTP ${res.status}`);
+  const data = await res.json();
+  const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  return JSON.parse(text) as Partial<AiDecision>;
+}
+
 export async function reviewGroup(g: Group): Promise<AiDecision> {
   const rules = rulesDecision(g);
   const key = process.env.GEMINI_API_KEY;
   if (!key) return rules;
 
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: buildPrompt(g, rules) }] }],
-        generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
-      }),
-      signal: AbortSignal.timeout(20000),
-    });
-    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
-    const data = await res.json();
-    const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    const parsed = JSON.parse(text) as Partial<AiDecision>;
-    return {
-      create_deal: parsed.create_deal === true && rules.create_deal,
-      reason: String(parsed.reason || rules.reason),
-      summary_tl: String(parsed.summary_tl || rules.summary_tl),
-      source: "gemini",
-    };
-  } catch (err) {
-    console.warn("[ai] Gemini unavailable, using rules:", err);
-    return { ...rules, reason: `${rules.reason} (Gemini unavailable, rules used.)` };
+  const prompt = buildPrompt(g, rules);
+  const failures: string[] = [];
+  for (const model of modelsToTry()) {
+    try {
+      const parsed = await askGemini(model, key, prompt);
+      return {
+        create_deal: parsed.create_deal === true && rules.create_deal,
+        reason: String(parsed.reason || rules.reason),
+        summary_tl: String(parsed.summary_tl || rules.summary_tl),
+        source: "gemini",
+      };
+    } catch (err) {
+      failures.push(err instanceof Error ? `${model}: ${err.name === "TimeoutError" ? "timeout" : err.message}` : String(err));
+    }
   }
+  console.warn("[ai] Gemini unavailable, using rules:", failures.join(" | "));
+  return { ...rules, reason: `${rules.reason} (Gemini unavailable, rules used.)` };
 }

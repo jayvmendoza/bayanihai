@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+artifacts/
+cache/
+typechain-types/
+.env
+.env.local
+data/state.json
+next-env.d.ts
+*.tsbuildinfo
+lib/contract.json

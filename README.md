@@ -50,6 +50,7 @@ Then open:
 
 On **/demo**:
 
+0. **Farmer posts a harvest.** Pick a crop and size, then **Ask AI for a fair price**. Gemini picks a price inside a fair window (buyers pay less than the market, the farmer earns at least 1.5x the middleman price) and explains it in Tagalog. Then **Post**. You can also do this on the farmer phone (**+ Mag-post ng ani**).
 1. **Run AI Deal Maker** first, before anyone joins. The AI answers **WAIT**: Holy Spirit has 145 kg, but the truck needs 150 kg.
 2. **Join with 5 kg** (or tap **Sumali** on the buyer phone). The group is now 150 kg.
 3. **Run AI Deal Maker** again. **CREATE DEAL** for Holy Spirit, and the AI wallet creates Deal #N on-chain. Poblacion (40 kg) still waits.
@@ -111,8 +112,12 @@ AI Deal Maker (Next.js API, Node.js)
 | The AI can | The AI cannot |
 |---|---|
 | Group buyers | Touch the money |
-| Suggest and check fair prices | Release payments (only the coordinator) |
+| Suggest fair prices (clamped to a fair window by rules) | Release payments (only the coordinator) |
 | Create the smart contract deal | Change a deal's rules after creation |
+
+**AI Fair Pricing rules.** Buyer price ≤ market − ₱5. Farmer price ≥ 1.5 × middleman price. Buyer price = farmer price + ₱25 transport. Gemini picks inside this window. If it answers outside it, the price is clamped. If Gemini is down, the rules pick ₱10 below market. Market and middleman prices in `lib/listing.ts` are **sample numbers**. Replace them with real PSA or DA data.
+
+Gemini calls go to several models at once and use the first valid answer, so one slow model can't stall the demo.
 
 These rules are enforced by the contract and covered by tests:
 
@@ -127,7 +132,8 @@ npm run test:contract
 | `contracts/BayanihaiEscrow.sol` | Escrow smart contract |
 | `test/escrow.test.js` | Contract tests (7) |
 | `scripts/deploy.js` | Deploys the contract, writes `lib/contract.json` |
-| `lib/ai.ts` | AI Deal Maker review (rules + Gemini) |
+| `lib/ai.ts` | AI Deal Maker review + AI Fair Pricing (rules + Gemini) |
+| `lib/listing.ts` | Crops, sample market prices, current listing shape |
 | `lib/chain.ts` | Reads deals from the blockchain |
 | `lib/store.ts` | Demo pre-orders and history (`data/state.json`) |
 | `app/api/action/route.ts` | Actions: order, deal-maker, pay, confirm, refund |
@@ -137,4 +143,5 @@ npm run test:contract
 
 - Wallets are managed by the server for the demo, so users never see crypto. A production version would use proper custodial or embedded wallets.
 - Pre-orders live in a JSON file. Production would use a database (e.g., Supabase).
-- One sample listing (carrots from Mang Ramon). Prices are sample numbers.
+- One farmer (Mang Ramon) and one listing at a time. The four crops use sample market prices.
+- Posting a new harvest starts a fresh demo round, and neighbors' pre-orders are simulated.

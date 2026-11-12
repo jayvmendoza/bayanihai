@@ -1,5 +1,6 @@
 // Shapes shared by the API and the screens (type-only, safe to import in client code).
-import type { Listing } from "./listing";
+import type { CropInfo, Listing } from "./listing";
+import type { PriceSuggestion } from "./ai";
 import type { DealRecord, GroupReview } from "./store";
 import type { OnChainDeal } from "./chain";
 
@@ -31,6 +32,8 @@ export type AppState = {
     now: number;
   };
   listing: Listing;
+  priceSuggestion: PriceSuggestion | null;
+  crops: CropInfo[];
   groups: GroupView[];
   you: { kg: number; pickup: string } | null;
   deal: DealView | null;

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { EXPLORER_URL, IS_LOCAL, wallet } from "@/lib/config";
 import { chainNow, escrow, escrowBalancePesos, loadDeployment, readDeal } from "@/lib/chain";
-import { LISTING } from "@/lib/listing";
 import { groupByPickup, readState } from "@/lib/store";
+import { CROPS } from "@/lib/listing";
 import type { AppState, DealView } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,9 @@ export async function GET() {
       escrowPesos: 0,
       now: Math.floor(Date.now() / 1000),
     },
-    listing: LISTING,
+    listing: s.listing,
+    priceSuggestion: s.priceSuggestion,
+    crops: Object.values(CROPS),
     groups,
     you: you ? { kg: you.kg, pickup: you.pickup } : null,
     deal: null,

@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Bar, Carrots, LockIcon, Phone } from "@/components/Phone";
+import { Bar, CropArt, LockIcon, Phone } from "@/components/Phone";
 import { Stage } from "@/components/Stage";
 import { peso, useAppState } from "@/lib/useAppState";
 
@@ -75,7 +75,7 @@ export default function BuyerPage() {
   } else if (status === "Funded") {
     message = <div className="ok">Buo na ang grupo! Paparating na ang ani.</div>;
   } else if (status === "Released") {
-    message = <div className="ok">Dumating na ang carrots! Nabayaran na si {listing.farmer}.</div>;
+    message = <div className="ok">Dumating na ang {listing.cropName.toLowerCase()}! Nabayaran na si {listing.farmer}.</div>;
   }
 
   return (
@@ -83,9 +83,9 @@ export default function BuyerPage() {
       <Phone>
         <div className="card">
           <div className="hero">
-            <Carrots />
+            <CropArt crop={listing.crop} />
           </div>
-          <div className="title">{listing.crop}</div>
+          <div className="title">{listing.cropName}</div>
           <p className="sub">
             Mula kay {listing.farmer}, {listing.origin}
           </p>

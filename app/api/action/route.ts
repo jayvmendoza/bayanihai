@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import type { ContractTransactionResponse } from "ethers";
 import { farmerAddress, haulerAddress, pesoToWei, wallet } from "@/lib/config";
 import { chainNow, escrow, fastForward, readDeal } from "@/lib/chain";
-import { reviewGroup } from "@/lib/ai";
-import { LISTING } from "@/lib/listing";
+import { reviewGroup, suggestPrice } from "@/lib/ai";
+import { CROPS, type CropKey } from "@/lib/listing";
 import { addLog, groupByPickup, readState, resetState, writeState, type DealRecord, type State } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 const DAY = 86400;
 const PICKUP = "Brgy. Holy Spirit";
 
-type Body = { action: string; kg?: number; who?: "you" | "neighbors"; scenario?: "success" | "fail"; seconds?: number };
+type Body = { action: string; kg?: number; crop?: string; who?: "you" | "neighbors"; scenario?: "success" | "fail"; seconds?: number };
 
 async function record(deal: DealRecord, label: string, sent: Promise<ContractTransactionResponse>) {
   const tx = await sent;
@@ -62,6 +62,39 @@ async function handle(s: State, body: Body): Promise<void> {
       return;
     }
 
+    case "price-suggest": {
+      const crop = body.crop as CropKey;
+      if (!CROPS[crop]) throw new Error("Choose a crop.");
+      const kg = Math.round(Number(body.kg));
+      if (!(kg >= 50 && kg <= 1000)) throw new Error("Harvest must be 50 to 1,000 kg.");
+      const p = await suggestPrice(crop, kg);
+      s.priceSuggestion = p;
+      addLog(s, `AI Fair Pricing (${p.source}) for ${kg} kg ${p.cropName}: ₱${p.farmerPricePerKg}/kg to farmer, ₱${p.buyerPricePerKg}/kg for buyers (market ₱${p.marketPricePerKg}, middleman ₱${p.middlemanPricePerKg}).`);
+      return;
+    }
+
+    case "post-harvest": {
+      const p = s.priceSuggestion;
+      if (!p) throw new Error("Ask the AI for a fair price first.");
+      // Posting a new harvest starts a fresh round: new listing, neighbors pre-order it.
+      const listing = {
+        ...s.listing,
+        crop: p.crop,
+        cropName: p.cropName,
+        farmerPricePerKg: p.farmerPricePerKg,
+        transportPerKg: p.transportPerKg,
+        buyerPricePerKg: p.buyerPricePerKg,
+        marketPricePerKg: p.marketPricePerKg,
+        middlemanPricePerKg: p.middlemanPricePerKg,
+        minKg: p.kg,
+        priceSource: p.source,
+        priceReason: p.reason_tl,
+      };
+      Object.assign(s, resetState(listing));
+      addLog(s, `${listing.farmer} posted ${listing.minKg} kg of ${listing.cropName} at ₱${listing.farmerPricePerKg}/kg (buyers pay ₱${listing.buyerPricePerKg}/kg).`);
+      return;
+    }
+
     case "order": {
       const kg = Math.round(Number(body.kg));
       if (!(kg >= 1 && kg <= 5)) throw new Error("Choose 1 to 5 kilos.");
@@ -77,7 +110,7 @@ async function handle(s: State, body: Body): Promise<void> {
       const c = escrow(wallet("agent"));
       // Review all open groups at the same time (Gemini calls can take a few seconds each).
       const pending = groupByPickup(s.preorders).filter((g) => !s.deals.some((d) => d.pickup === g.pickup));
-      const decisions = await Promise.all(pending.map((g) => reviewGroup(g)));
+      const decisions = await Promise.all(pending.map((g) => reviewGroup(g, s.listing)));
 
       for (const [i, g] of pending.entries()) {
         const ai = decisions[i];
@@ -95,8 +128,8 @@ async function handle(s: State, body: Body): Promise<void> {
             farmerAddress(),
             haulerAddress(),
             wallet("coordinator").address,
-            pesoToWei(LISTING.buyerPricePerKg),
-            pesoToWei(LISTING.farmerPricePerKg),
+            pesoToWei(s.listing.buyerPricePerKg),
+            pesoToWei(s.listing.farmerPricePerKg),
             g.totalKg,
             now + fundingWindow,
             now + fundingWindow + (scenario === "fail" ? 90 : 3 * DAY)
@@ -104,7 +137,7 @@ async function handle(s: State, body: Body): Promise<void> {
         );
         deal.dealId = Number(await c.dealCount());
         s.deals.push(deal);
-        addLog(s, `Deal #${deal.dealId} created on-chain for ${g.pickup}: ${g.totalKg} kg at ₱${LISTING.buyerPricePerKg}/kg.`);
+        addLog(s, `Deal #${deal.dealId} created on-chain for ${g.pickup}: ${g.totalKg} kg at ₱${s.listing.buyerPricePerKg}/kg.`);
       }
       return;
     }
@@ -115,9 +148,9 @@ async function handle(s: State, body: Body): Promise<void> {
       const kg = who === "you" ? deal.youKg : deal.totalKg - deal.youKg;
       if (kg <= 0) throw new Error(who === "you" ? "You didn't join this group." : "No neighbor orders to pay.");
       const c = escrow(wallet(who));
-      const value = pesoToWei(LISTING.buyerPricePerKg) * BigInt(kg);
+      const value = pesoToWei(s.listing.buyerPricePerKg) * BigInt(kg);
       await record(deal, who === "you" ? "You locked your payment" : "Neighbors locked their payments", c.joinDeal(deal.dealId, kg, { value }));
-      addLog(s, `${who === "you" ? "You" : "Neighbors"} locked ₱${(kg * LISTING.buyerPricePerKg).toLocaleString()} for ${kg} kg in escrow.`);
+      addLog(s, `${who === "you" ? "You" : "Neighbors"} locked ₱${(kg * s.listing.buyerPricePerKg).toLocaleString()} for ${kg} kg in escrow.`);
       return;
     }
 
@@ -138,7 +171,7 @@ async function handle(s: State, body: Body): Promise<void> {
         const kg = Number(await c.kgOf(deal.dealId, wallet(who).address));
         if (kg === 0) continue;
         await record(deal, who === "you" ? "You claimed your refund" : "Neighbors claimed refunds", c.claimRefund(deal.dealId));
-        refunded += kg * LISTING.buyerPricePerKg;
+        refunded += kg * s.listing.buyerPricePerKg;
       }
       if (refunded === 0) throw new Error("Nothing to refund.");
       addLog(s, `Refunded ₱${refunded.toLocaleString()} back to buyers.`);

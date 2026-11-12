@@ -1,18 +1,89 @@
 "use client";
-import { Bar, LockIcon, Phone } from "@/components/Phone";
+import { useState } from "react";
+import { Bar, CropArt, LockIcon, Phone } from "@/components/Phone";
 import { Stage } from "@/components/Stage";
 import { peso, useAppState } from "@/lib/useAppState";
 
-// Farmer app (Magsasaka). Shows what he will earn and whether the money is already set aside.
+const KG_CHOICES = [150, 200, 300];
+
+// Farmer app (Magsasaka): post a harvest with an AI-suggested fair price, then watch the payment.
 export default function FarmerPage() {
-  const { state } = useAppState();
+  const { state, busy, error, act } = useAppState();
+  const [posting, setPosting] = useState(false);
+  const [crop, setCrop] = useState("carrots");
+  const [kg, setKg] = useState(150);
+
   if (!state) return <Stage><Phone><p className="sub">Naglo-load…</p></Phone></Stage>;
 
-  const { listing, deal } = state;
+  const { listing, deal, priceSuggestion: sug } = state;
   const status = deal?.chain?.status;
-  const kg = deal?.chain?.targetKg ?? listing.minKg;
-  const earnings = kg * listing.farmerPricePerKg;
-  const middleman = kg * listing.middlemanPricePerKg;
+  const dealActive = status === "Open" || status === "Funded";
+
+  // ---------------------------------------------------------------- Post Harvest mode
+  if (posting && !dealActive) {
+    const sugMatches = sug && sug.crop === crop && sug.kg === kg;
+    return (
+      <Stage>
+        <Phone>
+          <div className="hello">
+            Mag-post ng ani,<b>{listing.farmer}</b>
+          </div>
+
+          <div className="card">
+            <div className="big">Anong ani?</div>
+            <div className="chips wrap" style={{ marginTop: 10 }}>
+              {state.crops.map((c) => (
+                <button key={c.key} className={c.key === crop ? "on" : ""} onClick={() => setCrop(c.key)}>
+                  {c.name}
+                </button>
+              ))}
+            </div>
+            <div className="big" style={{ marginTop: 14 }}>Ilang kilo?</div>
+            <div className="chips" style={{ marginTop: 10 }}>
+              {KG_CHOICES.map((n) => (
+                <button key={n} className={n === kg ? "on" : ""} onClick={() => setKg(n)}>
+                  {n} kg
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {sugMatches ? (
+            <div className="earn">
+              <div className="l">
+                Patas na presyo mula sa AI <span className="pill src">{sug.source === "gemini" ? "Gemini" : "Rules"}</span>
+              </div>
+              <div className="v">{peso(sug.farmerPricePerKg)}<small> / kilo</small></div>
+              <p className="why">{sug.reason_tl}</p>
+              <p className="cmp">
+                Middleman: {peso(sug.middlemanPricePerKg)} · Mamimili: {peso(sug.buyerPricePerKg)} (palengke {peso(sug.marketPricePerKg)})
+              </p>
+            </div>
+          ) : (
+            <button className="btn-ai" disabled={!!busy} onClick={() => act("price-suggest", { crop, kg })}>
+              {busy === "price-suggest" ? "Nag-iisip ang AI…" : "✦ Itanong sa AI ang patas na presyo"}
+            </button>
+          )}
+
+          {error && <div className="err">{error}</div>}
+
+          {sugMatches ? (
+            <button className="cta" disabled={!!busy} onClick={async () => { await act("post-harvest"); setPosting(false); }}>
+              I-post ang ani
+              <small>{kg} kilo · kikitain mo {peso(kg * sug.farmerPricePerKg)}</small>
+            </button>
+          ) : (
+            <button className="link" onClick={() => setPosting(false)}>Bumalik</button>
+          )}
+        </Phone>
+      </Stage>
+    );
+  }
+
+  // ---------------------------------------------------------------- Status mode
+  const kgTotal = deal?.chain?.targetKg ?? listing.minKg;
+  const earnings = kgTotal * listing.farmerPricePerKg;
+  const middleman = kgTotal * listing.middlemanPricePerKg;
   const times = (earnings / middleman).toFixed(1).replace(/\.0$/, "");
   const funded = deal?.chain?.fundedKg ?? 0;
 
@@ -41,15 +112,18 @@ export default function FarmerPage() {
           <span className="pill">{times}x kumpara sa middleman</span>
         </div>
 
-        <div className="card">
-          <div className="big">
-            {listing.crop} · {kg} kilo
+        <div className="card row-card">
+          <CropArt crop={listing.crop} size={54} />
+          <div style={{ flex: 1 }}>
+            <div className="big">
+              {listing.cropName} · {kgTotal} kilo
+            </div>
+            <Bar value={deal?.chain ? funded : 0} max={kgTotal} />
+            <p className="sub" style={{ marginTop: 8 }}>
+              {status === "Funded" || status === "Released" ? "✓ " : ""}
+              {groupLine}
+            </p>
           </div>
-          <Bar value={deal?.chain ? funded : 0} max={kg} />
-          <p className="sub" style={{ marginTop: 10 }}>
-            {status === "Funded" || status === "Released" ? "✓ " : ""}
-            {groupLine}
-          </p>
         </div>
 
         <div className="safe">
@@ -63,6 +137,11 @@ export default function FarmerPage() {
         {status === "Funded" && (
           <button className="cta" type="button">
             Ihanda ang ani
+          </button>
+        )}
+        {!dealActive && (
+          <button className="cta" onClick={() => setPosting(true)}>
+            + Mag-post ng ani
           </button>
         )}
       </Phone>

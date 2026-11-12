@@ -1,12 +1,18 @@
 "use client";
+import { useState } from "react";
 import { peso, useAppState } from "@/lib/useAppState";
 
 // Presenter control panel: drive the whole story step by step, with both phones live on the right.
 export default function DemoPage() {
   const { state, busy, error, act } = useAppState(1500);
+  const [crop, setCrop] = useState("carrots");
+  const [kg, setKg] = useState(150);
   if (!state) return <main className="demo"><p>Loading…</p></main>;
 
   const { chain, deal, listing } = state;
+  // Neighbors' pre-orders only (excludes your own order), so the copy stays right after you join.
+  const hs = state.groups.find((g) => g.pickup === "Brgy. Holy Spirit");
+  const neighbors = hs && { buyerCount: hs.buyerCount - (hs.youKg ? 1 : 0), totalKg: hs.totalKg - hs.youKg };
   const status = deal?.chain?.status;
   const txUrl = (hash: string) => (chain.explorer ? `${chain.explorer}/tx/${hash}` : "");
   const secondsLeft = (t?: number) => (t ? Math.max(0, t - chain.now) : 0);
@@ -36,8 +42,41 @@ export default function DemoPage() {
         </div>
 
         <div className="step">
+          <h2><span className="n">0</span> Farmer posts harvest · AI Fair Pricing</h2>
+          <p>
+            Now: <b>{listing.minKg} kg {listing.cropName}</b> at {peso(listing.farmerPricePerKg)}/kg to the farmer, {peso(listing.buyerPricePerKg)}/kg for buyers
+            (market {peso(listing.marketPricePerKg)}, middleman {peso(listing.middlemanPricePerKg)}) · priced by {listing.priceSource === "gemini" ? "Gemini" : "rules"}.
+          </p>
+          <div className="row">
+            <select value={crop} onChange={(e) => setCrop(e.target.value)} className="btn">
+              {state.crops.map((c) => (
+                <option key={c.key} value={c.key}>{c.name}</option>
+              ))}
+            </select>
+            <select value={kg} onChange={(e) => setKg(Number(e.target.value))} className="btn">
+              {[150, 200, 300].map((n) => (
+                <option key={n} value={n}>{n} kg</option>
+              ))}
+            </select>
+            {b("price-suggest", "Ask AI for a fair price", { crop, kg })}
+            {state.priceSuggestion && b("post-harvest", `Post at ${peso(state.priceSuggestion.farmerPricePerKg)}/kg`, {}, "btn primary")}
+          </div>
+          {state.priceSuggestion && (
+            <div className="review">
+              <span className="badge src">{state.priceSuggestion.source === "gemini" ? "Gemini" : "Rules only"}</span>
+              <b>{state.priceSuggestion.kg} kg {state.priceSuggestion.cropName}</b> · farmer {peso(state.priceSuggestion.farmerPricePerKg)}/kg · buyers{" "}
+              {peso(state.priceSuggestion.buyerPricePerKg)}/kg
+              <div><i>{state.priceSuggestion.reason_tl}</i></div>
+            </div>
+          )}
+        </div>
+
+        <div className="step">
           <h2><span className="n">1</span> Buyer joins the group</h2>
-          <p>44 neighbors in Brgy. Holy Spirit pre-ordered 145 kg. The truck needs {listing.minKg} kg. Join from the buyer phone, or here:</p>
+          <p>
+            {neighbors?.buyerCount ?? 0} neighbors in Brgy. Holy Spirit pre-ordered {neighbors?.totalKg ?? 0} kg. The truck needs {listing.minKg} kg. Join from the buyer
+            phone, or here:
+          </p>
           <div className="row">
             {b("order", state.you ? `Joined with ${state.you.kg} kg` : "Join with 5 kg", { kg: 5 })}
           </div>

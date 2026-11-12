@@ -33,6 +33,41 @@ export function Carrots({ size = 150 }: { size?: number }) {
   );
 }
 
+/** Simple illustration per crop (carrots keep the original art). */
+export function CropArt({ crop, size = 150 }: { crop: string; size?: number }) {
+  if (crop === "carrots") return <Carrots size={size} />;
+  const art: Record<string, React.ReactNode> = {
+    tomatoes: (
+      <g>
+        <circle cx="45" cy="65" r="26" fill="#E2453C" />
+        <circle cx="78" cy="70" r="22" fill="#F0614F" />
+        <path d="M45 40 l-8 -6 M45 40 l8 -6 M45 40 v-8 M78 49 l-6 -5 M78 49 l6 -5" stroke="#3E8E41" strokeWidth="4" strokeLinecap="round" />
+      </g>
+    ),
+    cabbage: (
+      <g>
+        <circle cx="60" cy="62" r="34" fill="#8BC34A" />
+        <path d="M60 30 C40 45 40 80 60 96 M60 30 C80 45 80 80 60 96" stroke="#5E9E2F" strokeWidth="4" fill="none" />
+        <circle cx="60" cy="62" r="14" fill="#C5E1A5" />
+      </g>
+    ),
+    potatoes: (
+      <g>
+        <ellipse cx="45" cy="66" rx="28" ry="20" fill="#C69C6D" />
+        <ellipse cx="80" cy="58" rx="22" ry="17" fill="#B8865A" />
+        <g fill="#8D6440">
+          <circle cx="38" cy="60" r="2.5" /><circle cx="52" cy="72" r="2.5" /><circle cx="78" cy="54" r="2.5" /><circle cx="86" cy="63" r="2.5" />
+        </g>
+      </g>
+    ),
+  };
+  return (
+    <svg width={size} height={size * 0.92} viewBox="0 0 120 110" aria-hidden>
+      {art[crop]}
+    </svg>
+  );
+}
+
 export function LockIcon({ color = "#E9B949", size = 32 }: { color?: string; size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

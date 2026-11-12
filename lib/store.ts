@@ -1,6 +1,8 @@
 import "server-only";
 import fs from "fs";
 import path from "path";
+import { DEFAULT_LISTING, type Listing } from "./listing";
+import type { PriceSuggestion } from "./ai";
 
 // Off-chain demo state (pre-orders, AI decisions, tx history), kept in a JSON file.
 // The money itself always lives on-chain in the escrow contract.
@@ -30,6 +32,8 @@ export type DealRecord = {
 };
 
 export type State = {
+  listing: Listing;
+  priceSuggestion: PriceSuggestion | null; // last AI price suggestion, waiting for the farmer to post
   preorders: PreOrder[];
   reviews: GroupReview[];
   deals: DealRecord[];
@@ -39,23 +43,43 @@ export type State = {
 const FILE = path.join(process.cwd(), "data", "state.json");
 
 const NAMES = ["Aling Nena", "Mang Jose", "Ate Liza", "Kuya Ben", "Lola Rosa", "Tita Marites", "Mang Lito", "Ate Joy", "Kuya Dan", "Aling Cora", "Tito Boy"];
+export const YOUR_KG_SLOT = 5; // neighbors leave the last 5 kg for "you" to complete the group
 
-function seed(): State {
+function seed(listing: Listing = DEFAULT_LISTING): State {
   const preorders: PreOrder[] = [];
-  // 44 neighbors in Brgy. Holy Spirit ordering 145 kg total (you'll add the last 5 kg).
-  for (let i = 0; i < 44; i++) {
-    preorders.push({ id: `hs-${i}`, name: `${NAMES[i % NAMES.length]} ${Math.floor(i / NAMES.length) + 1}`, pickup: "Brgy. Holy Spirit", kg: i < 13 ? 4 : 3 });
+  // Neighbors in Brgy. Holy Spirit pre-order everything except the last 5 kg (3-4 kg each).
+  const neighborsKg = listing.minKg - YOUR_KG_SLOT;
+  const count = Math.max(1, Math.round(neighborsKg / 3.3));
+  const base = Math.floor(neighborsKg / count);
+  const extra = neighborsKg - base * count;
+  for (let i = 0; i < count; i++) {
+    preorders.push({ id: `hs-${i}`, name: `${NAMES[i % NAMES.length]} ${Math.floor(i / NAMES.length) + 1}`, pickup: "Brgy. Holy Spirit", kg: i < extra ? base + 1 : base });
   }
-  // A smaller group that is NOT viable yet (40 kg, below the 150 kg truck minimum).
+  // A smaller group that is NOT viable yet (40 kg, below the truck minimum).
   for (let i = 0; i < 10; i++) {
     preorders.push({ id: `pb-${i}`, name: `${NAMES[(i + 3) % NAMES.length]} P`, pickup: "Brgy. Poblacion", kg: 4 });
   }
-  return { preorders, reviews: [], deals: [], log: [{ at: new Date().toISOString(), text: "Demo data ready: 44 neighbors pre-ordered in Brgy. Holy Spirit, 10 in Brgy. Poblacion." }] };
+  return {
+    listing,
+    priceSuggestion: null,
+    preorders,
+    reviews: [],
+    deals: [],
+    log: [
+      {
+        at: new Date().toISOString(),
+        text: `Demo ready: ${listing.minKg} kg of ${listing.cropName} from ${listing.farmer}. ${count} neighbors pre-ordered ${neighborsKg} kg in Brgy. Holy Spirit, 10 in Brgy. Poblacion.`,
+      },
+    ],
+  };
 }
 
 export function readState(): State {
   if (!fs.existsSync(FILE)) writeState(seed());
-  return JSON.parse(fs.readFileSync(FILE, "utf8")) as State;
+  const s = JSON.parse(fs.readFileSync(FILE, "utf8")) as Partial<State>;
+  // Older state files (before Post Harvest existed) have no listing: start fresh.
+  if (!s.listing) return resetState();
+  return { priceSuggestion: null, ...s } as State;
 }
 
 export function writeState(state: State): void {
@@ -63,8 +87,11 @@ export function writeState(state: State): void {
   fs.writeFileSync(FILE, JSON.stringify(state, null, 2));
 }
 
-export function resetState(): State {
-  const s = seed();
+/** Fresh demo for the given listing (defaults to the current one, or Mang Ramon's carrots). */
+export function resetState(listing?: Listing): State {
+  let current = listing;
+  if (!current && fs.existsSync(FILE)) current = (JSON.parse(fs.readFileSync(FILE, "utf8")) as Partial<State>).listing;
+  const s = seed(current ?? DEFAULT_LISTING);
   writeState(s);
   return s;
 }

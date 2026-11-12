@@ -150,20 +150,31 @@ export async function suggestPrice(crop: CropKey, kg: number): Promise<PriceSugg
     `Pick ONE buyer price per kg as a whole number between ₱${minBuyer} and ₱${maxBuyer}.`,
     "Balance it: buyers should save versus the market, and the farmer should earn clearly more than the middleman price.",
     "",
-    'Reply ONLY with JSON: {"buyer_price": number, "reason_tl": string (one short friendly Tagalog sentence to the farmer explaining the price)}.',
+    'Reply ONLY with JSON: {"buyer_price": number}.',
   ].join("\n");
 
-  const ai = await geminiJSON<{ buyer_price?: number; reason_tl?: string }>(prompt, "price");
+  const ai = await geminiJSON<{ buyer_price?: number }>(prompt, "price");
   const picked = Math.round(Number(ai?.buyer_price));
   if (!ai || !Number.isFinite(picked)) return rules;
 
   // Safety: clamp Gemini's answer into the fair window.
   const buyer = Math.max(minBuyer, Math.min(maxBuyer, picked));
+  const farmer = buyer - TRANSPORT_PER_KG;
+
+  // Explanation is written from the FINAL numbers, so it can never overstate (e.g. "triple" when it's 1.75x).
+  const explainPrompt = [
+    "Write ONE short, friendly Tagalog sentence to a Filipino farmer explaining this price. Use ONLY these exact facts and numbers; do not compute or invent any other comparison (no 'doble', 'triple', or percentages unless given here):",
+    `- Farmer gets ₱${farmer} per kilo instead of ₱${c.middlemanPricePerKg} from a middleman (₱${farmer - c.middlemanPricePerKg} more per kilo).`,
+    `- Buyers pay ₱${buyer} per kilo instead of ₱${c.marketPricePerKg} at the market (they save ₱${c.marketPricePerKg - buyer}).`,
+    'Reply ONLY with JSON: {"reason_tl": string}.',
+  ].join("\n");
+  const ex = await geminiJSON<{ reason_tl?: string }>(explainPrompt, "price-explain");
+
   return {
     ...base,
     buyerPricePerKg: buyer,
-    farmerPricePerKg: buyer - TRANSPORT_PER_KG,
-    reason_tl: String(ai.reason_tl || rules.reason_tl),
+    farmerPricePerKg: farmer,
+    reason_tl: String(ex?.reason_tl || `₱${farmer} kada kilo para sa iyo (₱${farmer - c.middlemanPricePerKg} higit sa middleman), at makakatipid ng ₱${c.marketPricePerKg - buyer} ang mamimili kumpara sa palengke.`),
     source: "gemini",
   };
 }

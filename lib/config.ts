@@ -11,7 +11,9 @@ export const EXPLORER_URL = IS_LOCAL ? "" : process.env.EXPLORER_URL || "https:/
 
 let provider: JsonRpcProvider | undefined;
 export function getProvider(): JsonRpcProvider {
-  provider ??= new JsonRpcProvider(RPC_URL);
+  // cacheTimeout -1: never reuse a cached nonce/block between quick back-to-back transactions
+  // (otherwise a fast "pay then refund" can fail with "nonce has already been used").
+  provider ??= new JsonRpcProvider(RPC_URL, undefined, { cacheTimeout: -1 });
   return provider;
 }
 

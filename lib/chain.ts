@@ -58,6 +58,9 @@ export async function escrowBalancePesos(): Promise<number> {
 }
 
 export async function chainNow(): Promise<number> {
+  // A local Hardhat chain only mines on transactions, so after idle time the latest block's timestamp is stale
+  // (deadlines computed from it can already be in the past). Mine an empty block first to sync the clock.
+  if (IS_LOCAL) await getProvider().send("evm_mine", []);
   const block = await getProvider().getBlock("latest");
   return block ? block.timestamp : Math.floor(Date.now() / 1000);
 }

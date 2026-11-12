@@ -10,3 +10,5 @@ data/state.json
 next-env.d.ts
 *.tsbuildinfo
 lib/contract.json
+video/node_modules/
+video/out/

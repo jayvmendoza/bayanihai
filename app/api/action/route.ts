@@ -1,11 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { PRESENTER_COOKIE, isPresenterOnly, presenterToken } from "@/lib/presenter";
-import type { ContractTransactionResponse } from "ethers";
+import { createHash } from "crypto";
 import { farmerAddress, haulerAddress, pesoToWei, wallet } from "@/lib/config";
 import { chainNow, escrow, fastForward, readDeal } from "@/lib/chain";
-import { reviewGroup, suggestPrice } from "@/lib/ai";
+import { checkReceipt, normalizeRef, reviewGroup, suggestPrice } from "@/lib/ai";
 import { CROPS, type CropKey } from "@/lib/listing";
-import { addLog, groupByPickup, readState, resetState, writeState, type DealRecord, type State } from "@/lib/store";
+import { addLog, groupByPickup, readState, resetState, writeState, type DealRecord, type PayMethod, type State } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 // Gemini + waiting for a BSC block can take a while; give the serverless function room on Vercel.
@@ -14,12 +14,36 @@ export const maxDuration = 60;
 const DAY = 86400;
 const PICKUP = "Brgy. Holy Spirit";
 
-type Body = { action: string; kg?: number; crop?: string; who?: "you" | "neighbors"; scenario?: "success" | "fail"; seconds?: number };
+type Body = { action: string; kg?: number; crop?: string; who?: "you" | "neighbors"; scenario?: "success" | "fail"; seconds?: number; image?: string };
 
-async function record(deal: DealRecord, label: string, sent: Promise<ContractTransactionResponse>) {
+async function record(deal: DealRecord, label: string, sent: Promise<{ hash: string; wait: () => Promise<unknown> }>): Promise<string> {
   const tx = await sent;
   await tx.wait();
   deal.txs.push({ label, hash: tx.hash });
+  return tx.hash;
+}
+
+const sha256 = (x: string) => createHash("sha256").update(x).digest("hex");
+const METHOD_TL: Record<PayMethod, string> = { gcash: "GCash", cash: "cash", wallet: "crypto wallet" };
+
+async function youPaidOnChain(deal: DealRecord): Promise<boolean> {
+  return Number(await escrow().kgOf(deal.dealId, wallet("you").address)) > 0;
+}
+
+/**
+ * Locks the buyer's share in the escrow contract. For GCash/cash the pesos were paid off-chain, so the
+ * platform funds the escrow on the buyer's behalf and appends a payment-proof memo to the same transaction
+ * (extra calldata: the contract ignores it, but it is stored on-chain and visible on BscScan).
+ */
+async function lockForYou(s: State, deal: DealRecord, method: PayMethod, memo: string | null): Promise<string> {
+  if (deal.youKg <= 0) throw new Error("You didn't join this group.");
+  const w = wallet("you");
+  const c = escrow(w);
+  const value = pesoToWei(s.listing.buyerPricePerKg) * BigInt(deal.youKg);
+  let data = c.interface.encodeFunctionData("joinDeal", [deal.dealId, deal.youKg]);
+  if (memo) data += Buffer.from(memo, "utf8").toString("hex");
+  const label = method === "wallet" ? "You locked your payment" : `You locked your payment (${METHOD_TL[method]})`;
+  return record(deal, label, w.sendTransaction({ to: await c.getAddress(), data, value }));
 }
 
 function latestDeal(s: State): DealRecord {
@@ -150,10 +174,66 @@ async function handle(s: State, body: Body): Promise<void> {
       const who = body.who === "neighbors" ? "neighbors" : "you";
       const kg = who === "you" ? deal.youKg : deal.totalKg - deal.youKg;
       if (kg <= 0) throw new Error(who === "you" ? "You didn't join this group." : "No neighbor orders to pay.");
-      const c = escrow(wallet(who));
-      const value = pesoToWei(s.listing.buyerPricePerKg) * BigInt(kg);
-      await record(deal, who === "you" ? "You locked your payment" : "Neighbors locked their payments", c.joinDeal(deal.dealId, kg, { value }));
-      addLog(s, `${who === "you" ? "You" : "Neighbors"} locked ₱${(kg * s.listing.buyerPricePerKg).toLocaleString()} for ${kg} kg in escrow.`);
+      const amountPesos = kg * s.listing.buyerPricePerKg;
+      let txHash: string;
+      if (who === "you") {
+        txHash = await lockForYou(s, deal, "wallet", null);
+      } else {
+        const c = escrow(wallet("neighbors"));
+        txHash = await record(deal, "Neighbors locked their payments", c.joinDeal(deal.dealId, kg, { value: pesoToWei(s.listing.buyerPricePerKg) * BigInt(kg) }));
+      }
+      s.payments.push({ who, method: "wallet", amountPesos, txHash, at: new Date().toISOString() });
+      addLog(s, `${who === "you" ? "You" : "Neighbors"} locked ₱${amountPesos.toLocaleString()} for ${kg} kg in escrow.`);
+      return;
+    }
+
+    case "pay-gcash": {
+      // Buyer paid with GCash and uploads the receipt. The AI reads it, the rules decide, then the escrow is funded.
+      const deal = latestDeal(s);
+      if (deal.youKg <= 0) throw new Error("You didn't join this group.");
+      if (await youPaidOnChain(deal)) throw new Error("Bayad ka na sa deal na ito.");
+      const m = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(body.image ?? "");
+      if (!m) throw new Error("Mag-upload ng larawan ng resibo (PNG o JPG).");
+      if (m[2].length > 4_000_000) throw new Error("Masyadong malaki ang larawan.");
+      const expected = deal.youKg * s.listing.buyerPricePerKg;
+      const imageHash = sha256(m[2]);
+      const cached = s.receiptReads.find((r) => r.imageHash === imageHash)?.read ?? null;
+      const check = await checkReceipt({ mime: m[1], base64: m[2] }, expected, (ref) => s.usedRefs.includes(sha256(ref)), cached);
+      if (check.read && !cached) s.receiptReads = [{ imageHash, read: check.read }, ...s.receiptReads].slice(0, 30);
+      s.lastReceipt = check;
+      addLog(s, `AI receipt check (${check.source}): ${check.ok ? "PASSED" : "REJECTED"}. ${check.summary_tl}`);
+      if (!check.ok) throw new Error(check.summary_tl);
+
+      const refHash = sha256(normalizeRef(check.read?.reference_no));
+      const memo = `BAYANIHAI|GCASH|ref:${refHash.slice(0, 16)}|php:${expected}|deal:${deal.dealId}`;
+      const txHash = await lockForYou(s, deal, "gcash", memo);
+      s.usedRefs.push(refHash); // only after the lock succeeds
+      s.payments.push({ who: "you", method: "gcash", amountPesos: expected, refMasked: check.refMasked ?? undefined, proof: memo, aiVerified: true, txHash, at: new Date().toISOString() });
+      addLog(s, `GCash ₱${expected.toLocaleString()} verified by AI (ref ${check.refMasked}) and locked in escrow. Receipt fingerprint recorded on-chain.`);
+      return;
+    }
+
+    case "pay-cash-intent": {
+      // Buyer will hand cash to the barangay coordinator. Nothing moves on-chain until the coordinator confirms.
+      const deal = latestDeal(s);
+      if (deal.youKg <= 0) throw new Error("You didn't join this group.");
+      if (await youPaidOnChain(deal)) throw new Error("Bayad ka na sa deal na ito.");
+      const amountPesos = deal.youKg * s.listing.buyerPricePerKg;
+      s.cashPending = { amountPesos, at: new Date().toISOString() };
+      addLog(s, `You chose to pay ₱${amountPesos.toLocaleString()} in cash to the barangay coordinator.`);
+      return;
+    }
+
+    case "cash-received": {
+      // Coordinator confirms the cash; the escrow is funded and the cash receipt is recorded on-chain.
+      const deal = latestDeal(s);
+      if (!s.cashPending) throw new Error("No cash payment is waiting for confirmation.");
+      const amountPesos = s.cashPending.amountPesos;
+      const memo = `BAYANIHAI|CASH|coordinator:${wallet("coordinator").address.slice(0, 10)}|php:${amountPesos}|deal:${deal.dealId}`;
+      const txHash = await lockForYou(s, deal, "cash", memo);
+      s.cashPending = null;
+      s.payments.push({ who: "you", method: "cash", amountPesos, proof: memo, txHash, at: new Date().toISOString() });
+      addLog(s, `Coordinator confirmed ₱${amountPesos.toLocaleString()} cash. Locked in escrow and recorded on-chain.`);
       return;
     }
 

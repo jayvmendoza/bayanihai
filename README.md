@@ -166,9 +166,22 @@ BAYANIHAI uses AI in two separate places: **inside the product** and **while bui
 | **AI Fair Pricing** | Picks one buyer price per kg for the harvest | Rules set the fair window first (buyer ≤ market − ₱5, farmer ≥ 1.5 × middleman). Any answer outside it is clamped. |
 | **Price explanation** | Writes one friendly Tagalog sentence for the farmer | Written *after* clamping, from the final numbers only, so it can't overstate the deal (an earlier version said "triple" for 1.75x, and we fixed that) |
 | **Deal review** | Decides CREATE DEAL or WAIT per pickup point and explains it in English and Tagalog | Final decision = Gemini **AND** the rules. Gemini can never approve a group under the 150 kg truck minimum. |
+| **AI Receipt Check (GCash)** | Reads the buyer's GCash receipt screenshot: amount, reference number, date, signs of editing | The rules decide: the amount must equal the order, the reference must be valid and never used before, no edit signs. A fingerprint (SHA-256) of the reference is written on-chain with the escrow lock, so the same receipt can't be reused. |
 | **Creating the deal on-chain** | The AI wallet calls `createDeal()` on BNB Smart Chain | The contract only lets the AI **create** deals. It cannot join, release or refund money (`NotAgent` / `NotCoordinator` checks, covered by tests). |
 
 **Reliability:** three Gemini models (`gemini-3.8-flash`, then `gemini-3.5-flash` and `gemini-3.1-flash-lite` as backups) are asked at once, each with a 20-second timeout, and the first valid answer wins. If all fail, or there's no API key, the rules decide alone, so the demo never stalls. Every review shows a **Gemini** or **Rules only** badge so it's always clear who decided.
+
+### Paying with GCash, cash, or a wallet
+
+Buyers choose how to pay; the money always ends up in the same escrow contract.
+
+| Method | How it reaches the escrow | What is recorded on BNB Smart Chain |
+|---|---|---|
+| **GCash** | Buyer uploads the receipt, the AI reads it, the rules check it, then the escrow is funded on the buyer's behalf | `BAYANIHAI|GCASH|ref:<sha256 prefix>|php:<amount>|deal:<id>` in the same transaction as the lock |
+| **Cash** | Buyer hands cash to the barangay coordinator, who confirms it in the console | `BAYANIHAI|CASH|coordinator:<address>|php:<amount>|deal:<id>` |
+| **Crypto wallet** | Buyer's wallet calls `joinDeal()` directly | the `joinDeal()` call itself |
+
+The proof memo is extra calldata after the `joinDeal()` arguments: the contract ignores it, but it is stored on-chain and readable on BscScan (Input Data). In this prototype GCash is not connected to a real payment API (that needs a merchant account, e.g. PayMongo or Xendit) and tBNB stands in for pesos in the escrow. The "Demo resibo" button makes a clearly-labelled sample receipt for testing.
 
 ### 2. While building: AI coding assistants
 

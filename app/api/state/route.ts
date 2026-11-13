@@ -40,6 +40,9 @@ export async function GET() {
     you: you ? { kg: you.kg, pickup: you.pickup } : null,
     deal: null,
     log: s.log,
+    payments: s.payments,
+    lastReceipt: s.lastReceipt,
+    cashPending: s.cashPending,
   };
 
   try {

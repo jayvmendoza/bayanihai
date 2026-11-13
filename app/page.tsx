@@ -5,6 +5,7 @@ import {
   ChainPill, Confetti, Count, GridIcon, GroupsList, ICONS, Icon, LockIcon, PICKUP, Road, Steps, TxProof, UserIcon,
   progressOf, st, stockBadge, useEmbed, useErrorToast, useShell,
 } from "@/components/bh";
+import { PaySheet } from "@/components/PaySheet";
 import { peso, useAppState } from "@/lib/useAppState";
 import type { CropKey } from "@/lib/listing";
 
@@ -20,6 +21,7 @@ export default function BuyerApp() {
   const { scr, setScr, go, say, reveal, frame } = useShell<Screen>("splash");
   const [kg, setKg] = useState(5);
   const [tab, setTab] = useState<"open" | "soon">("open");
+  const [paySheet, setPaySheet] = useState(false);
 
   // Embedded in /demo, or splash already seen in this tab: start on Home.
   useEmbed((embed) => {
@@ -78,14 +80,24 @@ export default function BuyerApp() {
     };
   } else if (you && !deal) {
     cta = { label: <><span className="bh-spinner" /> Hinihintay ang AI Deal Maker…</>, disabled: true, cls: "ghost" };
+  } else if (deal && status === "Open" && !refundable && youKg > 0 && !youPaid && state.cashPending) {
+    cta = { label: <><span className="bh-spinner" /> Hinihintay ang coordinator · cash {peso(state.cashPending.amountPesos)}</>, disabled: true, cls: "ghost" };
   } else if (deal && status === "Open" && !refundable && youKg > 0 && !youPaid) {
-    cta = { label: `Magbayad ${peso(youKg * listing.buyerPricePerKg)}`, onClick: () => act("pay", { who: "you" }), cls: "pulse" };
+    cta = { label: `Magbayad ${peso(youKg * listing.buyerPricePerKg)}`, onClick: () => setPaySheet(true), cls: "pulse" };
   } else if (deal && refundable && youPaid && !youRefunded) {
     cta = { label: `Kunin ang refund ${peso(deal.youLockedKg * listing.buyerPricePerKg)}`, onClick: () => act("refund"), cls: "pulse" };
   } else if (deal && !you && status === "Open") {
     cta = { label: "Sarado na ang grupong ito", disabled: true, cls: "ghost" };
   }
-  const mainCta = busy ? { label: <><span className="bh-spinner" /> Pinoproseso sa blockchain…</>, disabled: true, cls: "", onClick: undefined } : cta;
+  const youPayment = state.payments.find((x) => x.who === "you");
+  const methodNote = youPayment
+    ? youPayment.method === "gcash"
+      ? `GCash · AI-verified ${youPayment.refMasked ?? ""}`.trim()
+      : youPayment.method === "cash"
+        ? "Cash · kinumpirma ng coordinator"
+        : "Crypto wallet"
+    : null;
+  const mainCta = busy && !paySheet ? { label: <><span className="bh-spinner" /> Pinoproseso sa blockchain…</>, disabled: true, cls: "", onClick: undefined } : cta;
 
   // ---------------------------------------------------------------- splash (choose a role)
   const splashR = reveal("splash");
@@ -279,7 +291,11 @@ export default function BuyerApp() {
   const steps = [
     { done: !!you, title: you ? `Sumali ka · ${youKg} kilo` : "Sumali sa grupo", sub: "Wala pang bayad hanggang may deal" },
     { done: !!deal, title: deal ? `Ginawa ng AI ang Deal #${deal.dealId} sa BSC` : "AI Deal Maker", sub: deal ? "Gumagawa lang ng deal ang AI, hindi humahawak ng pera" : "Sinusuri ng AI kung sapat na ang grupo" },
-    { done: youPaid || status === "Released", title: "Nakalaan na ang bayad mo", sub: "Nasa smart contract, hindi pa sa magsasaka" },
+    {
+      done: youPaid || status === "Released",
+      title: state.cashPending && !youPaid ? `Cash ${peso(state.cashPending.amountPesos)} · hinihintay ang coordinator` : "Nakalaan na ang bayad mo",
+      sub: methodNote ? `${methodNote} · nasa smart contract` : "Nasa smart contract, hindi pa sa magsasaka",
+    },
     { done: status === "Funded" || status === "Released", title: deal?.chain ? `Buo na ang grupo · ${deal.chain.fundedKg} / ${deal.chain.targetKg} kilo` : "Buo na ang grupo", sub: "Papunta na ang truck" },
     { done: status === "Released", title: `Dumating na ang ${listing.cropName.toLowerCase()}!`, sub: "Kinumpirma ng coordinator, bayad na ang magsasaka" },
   ];
@@ -379,6 +395,18 @@ export default function BuyerApp() {
           <button className={`bh-nv ${scr === "track" ? "on" : ""}`} onClick={navTo("track")}><LockIcon />Bayad</button>
           <button className={`bh-nv ${scr === "profile" ? "on" : ""}`} onClick={navTo("profile")}><UserIcon />Profile</button>
         </nav>
+      )}
+      {paySheet && (
+        <PaySheet
+          state={state}
+          busy={busy}
+          act={act}
+          onClose={() => setPaySheet(false)}
+          onDone={() => {
+            setPaySheet(false);
+            setScr("track");
+          }}
+        />
       )}
     </>
   );

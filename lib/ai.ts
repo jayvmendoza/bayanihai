@@ -15,8 +15,10 @@ function modelsToTry(): string[] {
   return [...new Set([primary, "gemini-3.5-flash", "gemini-3.1-flash-lite"])];
 }
 
-/** Asks Gemini for a JSON answer. Returns null if no key is set or every model fails. */
-async function geminiJSON<T>(prompt: string, tag: string): Promise<T | null> {
+export type ImagePart = { mime: string; base64: string };
+
+/** Asks Gemini for a JSON answer (optionally about an image). Returns null if no key is set or every model fails. */
+async function geminiJSON<T>(prompt: string, tag: string, image?: ImagePart): Promise<T | null> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
 
@@ -28,7 +30,7 @@ async function geminiJSON<T>(prompt: string, tag: string): Promise<T | null> {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": key },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          contents: [{ parts: image ? [{ inline_data: { mime_type: image.mime, data: image.base64 } }, { text: prompt }] : [{ text: prompt }] }],
           generationConfig: { responseMimeType: "application/json", temperature: 0.2 },
         }),
         signal: AbortSignal.any([stop.signal, AbortSignal.timeout(20000)]),
@@ -42,15 +44,25 @@ async function geminiJSON<T>(prompt: string, tag: string): Promise<T | null> {
     }
   };
 
-  try {
-    const answer = await Promise.any(modelsToTry().map(ask));
-    stop.abort(); // cancel the slower calls
-    return answer;
-  } catch (err) {
-    const reasons = err instanceof AggregateError ? err.errors.map((e) => (e instanceof Error ? e.message : String(e))) : [String(err)];
-    console.warn(`[ai:${tag}] Gemini unavailable, using rules:`, reasons.join(" | "));
-    return null;
+  // Free-tier quotas (429) and busy models (503) are usually brief: one retry after a short pause.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const answer = await Promise.any(modelsToTry().map(ask));
+      stop.abort(); // cancel the slower calls
+      return answer;
+    } catch (err) {
+      const reasons = err instanceof AggregateError ? err.errors.map((e) => (e instanceof Error ? e.message : String(e))) : [String(err)];
+      const busy = reasons.every((r) => /HTTP (429|503)/.test(r));
+      if (attempt === 1 && busy) {
+        console.warn(`[ai:${tag}] Gemini busy, retrying once:`, reasons.join(" | "));
+        await new Promise((r) => setTimeout(r, 2500));
+        continue;
+      }
+      console.warn(`[ai:${tag}] Gemini unavailable, using rules:`, reasons.join(" | "));
+      return null;
+    }
   }
+  return null;
 }
 
 // ---------------------------------------------------------------- AI Deal Maker
@@ -177,4 +189,78 @@ export async function suggestPrice(crop: CropKey, kg: number): Promise<PriceSugg
     reason_tl: String(ex?.reason_tl || `₱${farmer} kada kilo para sa iyo (₱${farmer - c.middlemanPricePerKg} higit sa middleman), at makakatipid ng ₱${c.marketPricePerKg - buyer} ang mamimili kumpara sa palengke.`),
     source: "gemini",
   };
+}
+
+// ---------------------------------------------------------------- AI Receipt Check (GCash / e-wallet)
+// Gemini only READS the screenshot. The rules decide: the amount must match the order exactly,
+// the reference number must look valid, and it must never have been used before.
+
+export type ReceiptRead = {
+  is_receipt: boolean;
+  amount_php: number | null;
+  reference_no: string | null;
+  date: string | null;
+  recipient: string | null;
+  looks_edited: boolean;
+};
+
+export type ReceiptCheck = {
+  ok: boolean;
+  source: "gemini" | "none";
+  read: ReceiptRead | null;
+  expectedPesos: number;
+  refMasked: string | null;
+  checks: { label: string; ok: boolean }[];
+  summary_tl: string;
+};
+
+export const maskRef = (ref: string) => `••••${ref.slice(-4)}`;
+export const normalizeRef = (ref: string | null | undefined) => (ref ?? "").replace(/\D/g, "");
+
+export async function checkReceipt(
+  image: ImagePart,
+  expectedPesos: number,
+  isUsed: (ref: string) => boolean,
+  cachedRead?: ReceiptRead | null // what the AI already read from this exact image (no new AI call needed)
+): Promise<ReceiptCheck> {
+  const prompt = [
+    "You are checking a screenshot submitted as proof of an e-wallet (e.g. GCash) payment for a group-buy order.",
+    "Read ONLY what is visible. Do not guess missing values; use null.",
+    'Reply ONLY with JSON: {"is_receipt": boolean (is this a payment or money-transfer receipt at all), "amount_php": number|null (the amount sent, in pesos), "reference_no": string|null (the reference / transaction number, digits only), "date": string|null (YYYY-MM-DD), "recipient": string|null, "looks_edited": boolean (any visible signs of tampering such as mismatched fonts or overlaid numbers)}',
+  ].join("\n");
+  const read = cachedRead ?? (await geminiJSON<ReceiptRead>(prompt, "receipt", image));
+
+  if (!read) {
+    return {
+      ok: false,
+      source: "none",
+      read: null,
+      expectedPesos,
+      refMasked: null,
+      checks: [{ label: "Nabasa ng AI ang resibo", ok: false }],
+      summary_tl: "Hindi mabasa ng AI ang resibo ngayon. Subukan ulit, o magbayad ng cash sa coordinator.",
+    };
+  }
+
+  const ref = normalizeRef(read.reference_no);
+  const amount = Number(read.amount_php);
+  const checks = [
+    { label: "Resibo ng bayad", ok: read.is_receipt === true },
+    { label: `Halaga ay ₱${expectedPesos.toLocaleString("en-PH")}`, ok: Number.isFinite(amount) && Math.abs(amount - expectedPesos) < 0.5 },
+    { label: "May valid na reference number", ok: ref.length >= 8 && ref.length <= 20 },
+    { label: "Hindi pa nagamit ang resibo", ok: ref.length > 0 && !isUsed(ref) },
+    { label: "Walang bakas ng pag-edit", ok: read.looks_edited !== true },
+  ];
+  const ok = checks.every((c) => c.ok);
+  const firstBad = checks.find((c) => !c.ok);
+
+  let summary_tl: string;
+  if (ok) summary_tl = `Nabasa ng AI: ₱${amount.toLocaleString("en-PH")}, ref ${maskRef(ref)}. Tugma sa order mo.`;
+  else if (firstBad?.label.startsWith("Hindi pa nagamit")) summary_tl = `Nagamit na ang resibong ito (ref ${maskRef(ref)}). Hindi puwedeng gamitin ulit.`;
+  else if (firstBad?.label.startsWith("Halaga")) summary_tl = `Hindi tugma ang halaga: nakita ng AI ang ₱${Number.isFinite(amount) ? amount.toLocaleString("en-PH") : "?"}, pero ₱${expectedPesos.toLocaleString("en-PH")} ang order mo.`;
+  else if (firstBad?.label === "Resibo ng bayad") summary_tl = "Hindi ito mukhang resibo ng bayad. Paki-upload ang screenshot ng GCash receipt.";
+  else if (firstBad?.label.startsWith("May valid")) summary_tl = "Walang malinaw na reference number sa resibo.";
+  else summary_tl = "Mukhang na-edit ang resibo. Hindi ito tatanggapin.";
+
+  return { ok, source: "gemini", read, expectedPesos, refMasked: ref ? maskRef(ref) : null, checks, summary_tl };
 }

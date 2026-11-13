@@ -2,7 +2,7 @@ import "server-only";
 import fs from "fs";
 import path from "path";
 import { DEFAULT_LISTING, type Listing } from "./listing";
-import type { PriceSuggestion } from "./ai";
+import type { PriceSuggestion, ReceiptCheck, ReceiptRead } from "./ai";
 
 // Off-chain demo state (pre-orders, AI decisions, tx history), kept in a JSON file.
 // The money itself always lives on-chain in the escrow contract.
@@ -31,6 +31,20 @@ export type DealRecord = {
   txs: TxRecord[];
 };
 
+/** How a buyer paid. GCash/cash are paid in pesos; the escrow is funded on their behalf and the
+ *  payment proof (method + fingerprint of the receipt reference) is written on-chain with the lock. */
+export type PayMethod = "gcash" | "cash" | "wallet";
+export type PaymentRecord = {
+  who: "you" | "neighbors";
+  method: PayMethod;
+  amountPesos: number;
+  refMasked?: string; // e.g. ••••0123 (the full reference never leaves the server)
+  proof?: string; // the memo written on-chain with the escrow lock
+  aiVerified?: boolean;
+  txHash: string;
+  at: string;
+};
+
 export type State = {
   listing: Listing;
   priceSuggestion: PriceSuggestion | null; // last AI price suggestion, waiting for the farmer to post
@@ -38,6 +52,11 @@ export type State = {
   reviews: GroupReview[];
   deals: DealRecord[];
   log: { at: string; text: string }[];
+  payments: PaymentRecord[];
+  lastReceipt: ReceiptCheck | null; // what the AI read from the last uploaded receipt
+  cashPending: { amountPesos: number; at: string } | null; // buyer chose cash, waiting for the coordinator
+  usedRefs: string[]; // sha256 of every accepted receipt reference; kept across resets
+  receiptReads: { imageHash: string; read: ReceiptRead }[]; // AI reads by image fingerprint (same image = no new AI call); kept across resets
 };
 
 const FILE = path.join(process.cwd(), "data", "state.json");
@@ -62,6 +81,11 @@ function seed(listing: Listing = DEFAULT_LISTING): State {
   return {
     listing,
     priceSuggestion: null,
+    payments: [],
+    lastReceipt: null,
+    cashPending: null,
+    usedRefs: [],
+    receiptReads: [],
     preorders,
     reviews: [],
     deals: [],
@@ -141,13 +165,16 @@ export async function readState(): Promise<State> {
   const s = await loadRaw();
   // No state yet, or an older one from before Post Harvest existed: start fresh.
   if (!s || !s.listing) return resetState();
-  return { priceSuggestion: null, ...s } as State;
+  return { priceSuggestion: null, payments: [], lastReceipt: null, cashPending: null, usedRefs: [], receiptReads: [], ...s } as State;
 }
 
 /** Fresh demo for the given listing (defaults to the current one, or Mang Ramon's carrots). */
 export async function resetState(listing?: Listing): Promise<State> {
-  const current = listing ?? (await loadRaw())?.listing;
+  const prev = await loadRaw();
+  const current = listing ?? prev?.listing;
   const s = seed(current ?? DEFAULT_LISTING);
+  s.usedRefs = prev?.usedRefs ?? []; // a receipt stays "used" even after a new round starts
+  s.receiptReads = prev?.receiptReads ?? [];
   await writeState(s);
   return s;
 }

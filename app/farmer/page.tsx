@@ -122,6 +122,11 @@ export default function FarmerApp() {
         <div>
           <b style={{ display: "block", fontSize: 15 }}>{safe.title}</b>
           <span style={{ fontSize: 12.5, color: "var(--g3)", fontWeight: 600 }}>{safe.text}</span>
+          {state.payments.length > 0 && (
+            <span style={{ display: "block", marginTop: 6, fontSize: 11.5, color: "#fff", fontWeight: 700 }}>
+              {state.payments.map((x) => `${x.method === "gcash" ? "GCash ✓AI" : x.method === "cash" ? "Cash" : "Wallet"} ${peso(x.amountPesos)}`).join(" · ")}
+            </span>
+          )}
         </div>
       </div>
 

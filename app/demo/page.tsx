@@ -158,10 +158,11 @@ export default function DemoPage() {
           </StepCard>
 
           <StepCard s={stepState(3)} n={3} title="Buyers lock payment in escrow" tag="Smart contract">
-            <p>The money goes to the smart contract, not to the farmer.</p>
+            <p>The money goes to the smart contract, not to the farmer. Buyers pay by <b>GCash</b> (AI reads the receipt), <b>cash</b> to the coordinator, or a <b>crypto wallet</b>; the method and proof are recorded on-chain with the lock.</p>
             <div className="row">
               {b("pay", "You pay", { who: "you" }, current === 3 && !(deal && deal.youLockedKg > 0) ? "btn primary" : "btn")}
               {b("pay", "Neighbors pay", { who: "neighbors" }, current === 3 && deal && deal.youLockedKg > 0 ? "btn primary" : "btn")}
+              {state.cashPending && b("cash-received", `Coordinator: received cash ${peso(state.cashPending.amountPesos)}`, {}, "btn primary")}
               {deal?.chain && (
                 <span className="status">
                   Deal #{deal.dealId} · {status} · {deal.chain.fundedKg}/{deal.chain.targetKg} kg
@@ -170,6 +171,21 @@ export default function DemoPage() {
               )}
             </div>
           </StepCard>
+
+          {(state.payments.length > 0 || state.lastReceipt) && (
+            <div className="review" style={{ marginTop: -4 }}>
+              {state.payments.map((x) => (
+                <div key={x.txHash}>
+                  <span className={`badge ${x.method === "gcash" ? "src" : "yes"}`}>{x.method === "gcash" ? "GCASH · AI-VERIFIED" : x.method === "cash" ? "CASH · COORDINATOR" : "WALLET"}</span>
+                  <b>{x.who === "you" ? "Buyer" : "Neighbors"}</b> {peso(x.amountPesos)} {x.refMasked ? `· ref ${x.refMasked}` : ""}
+                  {x.proof && <div className="meta">on-chain proof: {x.proof}</div>}
+                </div>
+              ))}
+              {state.lastReceipt && !state.lastReceipt.ok && (
+                <div><span className="badge no">AI REJECTED RECEIPT</span>{state.lastReceipt.summary_tl}</div>
+              )}
+            </div>
+          )}
 
           <StepCard s={stepState(4)} n={4} title="Delivery confirmed → farmer paid">
             <p>Only the barangay coordinator can confirm. The AI cannot release money.</p>

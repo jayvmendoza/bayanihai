@@ -1,0 +1,9 @@
+Contract address:   0xFD20336648aF1fEA94649d8F889925De01B11b25
+Open:               https://testnet.bscscan.com/verifyContract?a=0xFD20336648aF1fEA94649d8F889925De01B11b25
+Compiler type:      Solidity (Single file)
+Compiler version:   v0.8.24 (pick the +commit entry for 0.8.24)
+License:            MIT
+Optimization:       Yes, 200 runs
+EVM version:        paris
+Source code:        paste verify/BayanihaiEscrow.flat.sol
+Constructor args:   0000000000000000000000001553fca402007dfcba88f73e2cef4f5b6747f3a0

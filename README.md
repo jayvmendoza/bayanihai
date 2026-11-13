@@ -8,6 +8,16 @@ A smart contract holds the buyers' money and releases it to the farmer only afte
 
 > **AI makes the deal. Blockchain protects the money.**
 
+## Live on BNB Smart Chain Testnet
+
+| | |
+|---|---|
+| Escrow contract (verified) | [`0xFD20336648aF1fEA94649d8F889925De01B11b25`](https://testnet.bscscan.com/address/0xFD20336648aF1fEA94649d8F889925De01B11b25#code) |
+| AI agent wallet (can only create deals) | [`0x1553fCa402007DFCbA88f73e2cEF4f5B6747f3a0`](https://testnet.bscscan.com/address/0x1553fCa402007DFCbA88f73e2cEF4f5B6747f3a0) |
+| Full demo run (deal #1, Nov 13) | [AI creates deal](https://testnet.bscscan.com/tx/0xf36e6aedf433aac27922267d0a334fd52d7efa2eaf94afb79db5a00e4006b062) → [buyer pays](https://testnet.bscscan.com/tx/0xd55bec79cb86f4a28e6112f5d7dbc00585216e31a38f1e52538c9d7af76c03cd) → [neighbors pay](https://testnet.bscscan.com/tx/0x9f8ca7bc4bc4f3caf4c762f692e21c9e5b599e3ed6049f83404196c963bb6a84) → [delivery confirmed, farmer + hauler paid](https://testnet.bscscan.com/tx/0xc78b4d9eb5a8624bfca45e51a104e1a645ed0798fe0c24367b8a79279e4c25c2) |
+
+Test wallets only, no real funds. Amounts are scaled so ₱1 = 0.000001 tBNB.
+
 ---
 
 ## Run it locally (no keys needed)

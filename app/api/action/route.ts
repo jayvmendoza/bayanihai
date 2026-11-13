@@ -5,7 +5,7 @@ import { farmerAddress, haulerAddress, pesoToWei, wallet } from "@/lib/config";
 import { chainNow, escrow, fastForward, readDeal } from "@/lib/chain";
 import { checkReceipt, normalizeRef, reviewGroup, suggestPrice } from "@/lib/ai";
 import { CROPS, type CropKey } from "@/lib/listing";
-import { addLog, aiRunning, groupByPickup, readState, resetState, writeState, type DealRecord, type PayMethod, type State } from "@/lib/store";
+import { addLog, aiRunning, commitState, groupByPickup, readState, resetState, writeState, type DealRecord, type PayMethod, type State } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 // Gemini + waiting for a BSC block can take a while; give the serverless function room on Vercel.
@@ -398,14 +398,15 @@ export async function POST(req: NextRequest) {
   }
 
   const s = await readState();
+  const before: State = structuredClone(s);
   try {
     await handle(s, body);
-    await writeState(s);
+    await commitState(before, s);
     return NextResponse.json({ ok: true });
   } catch (err) {
     const msg = errorMessage(err);
     addLog(s, `⚠ ${msg}`);
-    await writeState(s);
+    await commitState(before, s);
     return NextResponse.json({ ok: false, error: msg }, { status: 400 });
   }
 }

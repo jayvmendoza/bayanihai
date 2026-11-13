@@ -205,3 +205,31 @@ export function groupByPickup(preorders: PreOrder[]): Group[] {
   }
   return [...map.values()];
 }
+
+/**
+ * Saves what ONE request changed, on top of the latest saved state. Actions can take a while (Gemini, waiting for a
+ * BSC block), and other phones may save in the meantime; writing the whole old copy back would erase their work.
+ * - Fields this request didn't touch keep their latest value.
+ * - New log lines are added on top of the latest log.
+ * - Receipt fingerprints and AI reads are unioned (a used receipt must stay used).
+ * - If the demo was reset meanwhile (new round), only those receipt records are kept.
+ */
+export async function commitState(before: State, after: State): Promise<void> {
+  const latest = await readState();
+  const merged: State = { ...latest };
+  const changed = (k: keyof State) => JSON.stringify(before[k]) !== JSON.stringify(after[k]);
+  const sameRound = latest.round === before.round || after.round !== before.round;
+
+  if (sameRound) {
+    for (const k of Object.keys(after) as (keyof State)[]) {
+      if (k === "log" || k === "usedRefs" || k === "receiptReads") continue;
+      if (changed(k)) (merged as Record<string, unknown>)[k] = after[k];
+    }
+    const fresh = after.log.filter((l) => !before.log.some((b) => b.at === l.at && b.text === l.text));
+    merged.log = after.round !== before.round ? after.log : [...fresh, ...latest.log].slice(0, 40);
+  }
+  merged.usedRefs = [...new Set([...latest.usedRefs, ...after.usedRefs])];
+  const reads = [...after.receiptReads, ...latest.receiptReads];
+  merged.receiptReads = reads.filter((r, i) => reads.findIndex((x) => x.imageHash === r.imageHash) === i).slice(0, 30);
+  await writeState(merged);
+}

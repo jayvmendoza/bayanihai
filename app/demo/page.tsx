@@ -225,7 +225,7 @@ export default function DemoPage() {
 
         <section className="phones">
           <figure>
-            <div className="frame"><iframe src="/?embed=1" title="Buyer app" /></div>
+            <div className="frame bezel"><iframe src="/?embed=1" title="Buyer app" /></div>
             <figcaption>Mamimili <span>· Buyer</span></figcaption>
           </figure>
           <figure>

@@ -161,3 +161,7 @@ select.btn { padding-right: 10px; }
   body:not(.embed) .brand { padding-top: calc(18px + env(safe-area-inset-top)); }
   body:not(.embed) .body { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
 }
+
+/* The new buyer app draws no phone frame of its own, so the presenter view adds one around its iframe. */
+.phones .frame.bezel { position: relative; border-radius: 48px; }
+.phones .frame.bezel::after { content: ""; position: absolute; inset: 0; border: 11px solid #0c0f0d; border-radius: 48px; pointer-events: none; z-index: 1; }

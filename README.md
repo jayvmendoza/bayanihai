@@ -10,11 +10,14 @@ A smart contract holds the buyers' money and releases it to the farmer only afte
 
 ## Live on BNB Smart Chain Testnet
 
+Every buyer payment goes to **one place: the escrow smart contract**. The money stays there, safe for both sides, until the **farmer delivers** and the **buyer confirms receipt**.
+
 | | |
 |---|---|
-| Escrow contract (verified) | [`0xFD20336648aF1fEA94649d8F889925De01B11b25`](https://testnet.bscscan.com/address/0xFD20336648aF1fEA94649d8F889925De01B11b25#code) |
+| Escrow contract **v2** | [`0xaDE4975e93a5c1b7ac5A10b4e99CCfFb43E1703A`](https://testnet.bscscan.com/address/0xaDE4975e93a5c1b7ac5A10b4e99CCfFb43E1703A#code) |
 | AI agent wallet (can only create deals) | [`0x1553fCa402007DFCbA88f73e2cEF4f5B6747f3a0`](https://testnet.bscscan.com/address/0x1553fCa402007DFCbA88f73e2cEF4f5B6747f3a0) |
-| Full demo run (deal #1, Nov 13) | [AI creates deal](https://testnet.bscscan.com/tx/0xf36e6aedf433aac27922267d0a334fd52d7efa2eaf94afb79db5a00e4006b062) → [buyer pays](https://testnet.bscscan.com/tx/0xd55bec79cb86f4a28e6112f5d7dbc00585216e31a38f1e52538c9d7af76c03cd) → [neighbors pay](https://testnet.bscscan.com/tx/0x9f8ca7bc4bc4f3caf4c762f692e21c9e5b599e3ed6049f83404196c963bb6a84) → [delivery confirmed, farmer + hauler paid](https://testnet.bscscan.com/tx/0xc78b4d9eb5a8624bfca45e51a104e1a645ed0798fe0c24367b8a79279e4c25c2) |
+| Full v2 run (deal #1, Nov 13) | [AI creates deal](https://testnet.bscscan.com/tx/0xbf9628578af5c44b8b69057166a197648807a214214866cf47f51a0b1d3648eb) → [neighbors pay](https://testnet.bscscan.com/tx/0xc7f08ed4b4df6dea8363fd33712c201c5589f65f2f096d0efacbfb49961b17fd) → [buyer pays by GCash, AI-verified receipt proof stored](https://testnet.bscscan.com/tx/0xa92263e8d6d9ce89bb1f7c01175954c3358661e784dd06e9f34f5bc95bca10f8) → [farmer marks delivered](https://testnet.bscscan.com/tx/0x3f8142fd81feb5665f6607dba752d7e01cf8f0551a92a2a15d666740de450865) → [buyer confirms receipt, farmer + hauler paid](https://testnet.bscscan.com/tx/0xe24e088d3d7141086b336ba3cbfbcb9760d736ceeb953af3936c484400f60238) |
+| v1 (first version, verified) | [`0xFD20336648aF1fEA94649d8F889925De01B11b25`](https://testnet.bscscan.com/address/0xFD20336648aF1fEA94649d8F889925De01B11b25#code), coordinator-only release |
 
 Test wallets only, no real funds. Amounts are scaled so ₱1 = 0.000001 tBNB.
 
@@ -58,14 +61,15 @@ Then open:
 
 ## Demo script (about 2 minutes)
 
-The AI runs **automatically**. People only do what people should do: buy, pay, and confirm delivery.
+The AI runs **automatically**. People only do what people should do: buy, pay, deliver, and confirm receipt.
 
 | # | Who | Action | What happens automatically |
 |---|---|---|---|
 | 0 | Farmer (`/farmer`) | **+ Ani** → pick crop and kilos → **Itanong sa AI** → **I-post** | Gemini picks a fair price inside the rules (buyers pay less than the market, the farmer earns at least 1.5x the middleman) and explains it in Tagalog |
 | 1 | Buyer (`/`) | **Mamimili ako** → Carrots → **Sumali** (5 kg) | The **AI Deal Maker starts by itself**: Holy Spirit reaches 150 kg → **CREATE DEAL**, the AI wallet creates the deal on BNB Smart Chain, and the neighbors' pre-orders pay in (145/150 kg). Poblacion (40 kg) gets **WAIT**. Takes about 15 seconds. |
 | 2 | Buyer | **Magbayad** → **GCash** (upload receipt or **Demo resibo**), **Cash**, or **Crypto wallet** | GCash: the AI reads the receipt, the rules check it, the escrow is funded and the proof is recorded on-chain. The group is now 150/150 (**Funded**). |
-| 3 | Coordinator (`/demo`) | **Coordinator confirms delivery** (and **received cash** if the buyer chose cash) | The contract pays the farmer and the hauler. With the carrots listing at ₱40/₱65: farmer ₱6,000, hauler ₱3,750, escrow for this deal back to ₱0. |
+| 3 | Farmer (`/farmer`) | **🚚 Naihatid ko na** | The farmer signs `markDelivered()` on-chain. The money **stays locked** in the contract. |
+| 4 | Buyer (`/`) | **Natanggap ko na ✓** (or **May problema?** to dispute) | `confirmReceived()`: the contract pays the farmer and the hauler. With the carrots listing at ₱40/₱65: farmer ₱6,000, hauler ₱3,750, escrow for this deal back to ₱0. If no buyer answers within the confirm window (2 minutes in the demo), the farmer can claim; a dispute locks it until the coordinator decides. |
 
 Fraud check: after a round paid with **Demo resibo**, **Reset demo**, join again, and tap **Ulitin ang huling resibo**. The AI rejects it: *"Nagamit na ang resibong ito."*
 
@@ -93,6 +97,7 @@ Use **test wallets only**.
    AGENT_ADDRESS=0x...          # AI agent wallet address
    AGENT_PRIVATE_KEY=0x...      # AI agent wallet key
    DEMO_PRIVATE_KEY=0x...       # plays buyer, neighbors and coordinator (can be the deployer)
+   FARMER_PRIVATE_KEY=0x...   # farmer wallet: signs "Naihatid na" and receives the payout
    FARMER_ADDRESS=0x...
    HAULER_ADDRESS=0x...
    ```
@@ -133,10 +138,14 @@ AI Deal Maker (Next.js API, Node.js)
   1. groups pre-orders by pickup point
   2. rules check the math (≥ 150 kg)
   3. Gemini decides + explains (Tagalog)
-  4. AI wallet calls createDeal()  ──►  BayanihaiEscrow (Solidity, BNB Smart Chain)
-                                          joinDeal()        buyers lock money
-                                          confirmDelivery() coordinator → farmer + hauler paid
-                                          claimRefund()     buyers pull money back if it fails
+  4. AI wallet calls createDeal()  ──►  BayanihaiEscrow v2 (Solidity, BNB Smart Chain)
+                                          joinDeal()          every buyer payment is locked here
+                                                              (method + proof; a GCash proof works once)
+                                          markDelivered()     farmer says delivered (money still locked)
+                                          confirmReceived()   buyer or coordinator → farmer + hauler paid
+                                          dispute()           buyer: "it didn't arrive" → coordinator decides
+                                          claimAfterWindow()  nobody answered in time → farmer is paid
+                                          claimRefund()       group didn't fill / never delivered → buyers refunded
 ```
 
 **Safety by design**
@@ -206,7 +215,7 @@ The proof memo is extra calldata after the `joinDeal()` arguments: the contract 
 | Path | What it is |
 |---|---|
 | `contracts/BayanihaiEscrow.sol` | Escrow smart contract |
-| `test/escrow.test.js` | Contract tests (7) |
+| `test/escrow.test.js` | Contract tests (14) |
 | `scripts/deploy.js` | Deploys the contract, writes `lib/contract.json` |
 | `lib/ai.ts` | AI Deal Maker review + AI Fair Pricing (rules + Gemini) |
 | `lib/listing.ts` | Crops, sample market prices, current listing shape |

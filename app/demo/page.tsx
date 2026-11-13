@@ -11,7 +11,12 @@ const BUSY_TEXT: Record<string, string> = {
   "deal-maker": "AI Deal Maker is reviewing the groups…",
   "set-scenario": "Updating the next deal…",
   pay: "Locking payment in the escrow contract…",
-  confirm: "Releasing payment on-chain…",
+  confirm: "Coordinator confirming receipt on-chain…",
+  "mark-delivered": "Farmer marking the harvest delivered…",
+  "claim-window": "Releasing payment after the confirm window…",
+  resolve: "Coordinator resolving the dispute…",
+  receive: "Buyer confirming receipt…",
+  dispute: "Buyer reporting a problem…",
   "fast-forward": "Fast-forwarding the chain clock…",
   refund: "Returning money to the buyers…",
   reset: "Resetting the demo…",
@@ -55,7 +60,9 @@ export default function DemoPage() {
   const secondsLeft = (t?: number) => (t ? Math.max(0, t - chain.now) : 0);
 
   // Which step the presenter should do next (1-4 happy path, 5 refund path).
-  const current = !state.you ? 1 : !deal ? 2 : status === "Open" && refundable ? 5 : status === "Open" ? 3 : status === "Funded" ? 4 : 6;
+  const current =
+    !state.you ? 1 : !deal ? 2 : status === "Open" && refundable ? 5 : status === "Open" ? 3 : status === "Funded" || status === "Delivered" || status === "Disputed" ? 4 : 6;
+  const windowOver = !!deal?.chain?.confirmBy && chain.now >= deal.chain.confirmBy;
   const stepState = (n: number) => {
     if (n === 5) return status === "Refunded" ? "done" : current === 5 ? "active" : "";
     if (status === "Refunded" && n >= 3) return "";
@@ -196,10 +203,24 @@ export default function DemoPage() {
             </div>
           )}
 
-          <StepCard s={stepState(4)} n={4} title="Delivery confirmed → farmer paid">
-            <p>Only the barangay coordinator can confirm. The AI cannot release money.</p>
+          <StepCard s={stepState(4)} n={4} title="Farmer delivers → buyer confirms → paid" tag="Two-sided release">
+            <p>
+              The money stays in the contract until the <b>farmer</b> marks it delivered <b>and</b> a <b>buyer</b> (on the phone) or the <b>coordinator</b> confirms
+              receipt. If nobody confirms within {Math.round(120 / 60)} minutes, the farmer can claim; a buyer&apos;s dispute stops that and the coordinator decides. The AI
+              can never release money.
+            </p>
             <div className="row">
-              {b("confirm", "Coordinator confirms delivery", {}, current === 4 ? "btn primary" : "btn")}
+              {b("mark-delivered", "Farmer: mark delivered", {}, status === "Funded" ? "btn primary" : "btn")}
+              {b("confirm", "Coordinator: confirm received", {}, status === "Delivered" ? "btn primary" : "btn")}
+              {status === "Delivered" && windowOver && b("claim-window", "Farmer: claim after window", {}, "btn")}
+              {status === "Disputed" && b("resolve", "Resolve: pay farmer", { payFarmer: true }, "btn primary")}
+              {status === "Disputed" && b("resolve", "Resolve: refund buyers", { payFarmer: false }, "btn warn")}
+              {status === "Delivered" && deal?.chain && (
+                <span className="status">
+                  Delivered · confirm window {windowOver ? "over" : `${Math.max(0, deal.chain.confirmBy - chain.now)}s left`}
+                </span>
+              )}
+              {status === "Disputed" && <span className="status">Buyer disputed · coordinator decides</span>}
               {status === "Released" && deal && (
                 <span className="status">
                   Farmer +{peso(deal.farmerReceived)} · Hauler +{peso(deal.haulerReceived)}

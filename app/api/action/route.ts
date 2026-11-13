@@ -14,7 +14,7 @@ export const maxDuration = 60;
 const DAY = 86400;
 const PICKUP = "Brgy. Holy Spirit";
 
-type Body = { action: string; kg?: number; crop?: string; who?: "you" | "neighbors"; scenario?: "success" | "fail"; seconds?: number; image?: string };
+type Body = { action: string; kg?: number; crop?: string; who?: "you" | "neighbors"; scenario?: "success" | "fail"; seconds?: number; image?: string; payFarmer?: boolean };
 
 async function record(deal: DealRecord, label: string, sent: Promise<{ hash: string; wait: () => Promise<unknown> }>): Promise<string> {
   const tx = await sent;
@@ -25,24 +25,24 @@ async function record(deal: DealRecord, label: string, sent: Promise<{ hash: str
 
 const sha256 = (x: string) => createHash("sha256").update(x).digest("hex");
 const METHOD_TL: Record<PayMethod, string> = { gcash: "GCash", cash: "cash", wallet: "crypto wallet" };
+const METHOD_ID: Record<PayMethod, number> = { wallet: 0, gcash: 1, cash: 2 }; // BayanihaiEscrow.Method
+const NO_PROOF = "0x" + "0".repeat(64);
+const CONFIRM_WINDOW = 120; // demo: buyers have 2 minutes to confirm or dispute (production: e.g. 3 days)
 
 /** The buyer's own payment for this round (each payment record is backed by its own on-chain transaction). */
 const youPaid = (s: State) => s.payments.some((p) => p.who === "you");
 
 /**
- * Locks the buyer's share in the escrow contract. For GCash/cash the pesos were paid off-chain, so the
- * platform funds the escrow on the buyer's behalf and appends a payment-proof memo to the same transaction
- * (extra calldata: the contract ignores it, but it is stored on-chain and visible on BscScan).
+ * Locks the buyer's share in the escrow contract: the ONE place every payment goes. For GCash/cash the pesos were
+ * paid off-chain (in production through an on-ramp straight into the contract), so the escrow is funded for the
+ * buyer with the payment method and a proof fingerprint. The contract rejects a proof that was used before.
  */
-async function lockForYou(s: State, deal: DealRecord, method: PayMethod, memo: string | null): Promise<string> {
+async function lockForYou(s: State, deal: DealRecord, method: PayMethod, proof: string): Promise<string> {
   if (deal.youKg <= 0) throw new Error("You didn't join this group.");
-  const w = wallet("you");
-  const c = escrow(w);
+  const c = escrow(wallet("you"));
   const value = pesoToWei(s.listing.buyerPricePerKg) * BigInt(deal.youKg);
-  let data = c.interface.encodeFunctionData("joinDeal", [deal.dealId, deal.youKg]);
-  if (memo) data += Buffer.from(memo, "utf8").toString("hex");
   const label = method === "wallet" ? "You locked your payment" : `You locked your payment (${METHOD_TL[method]})`;
-  return record(deal, label, w.sendTransaction({ to: await c.getAddress(), data, value }));
+  return record(deal, label, c.joinDeal(deal.dealId, deal.youKg, METHOD_ID[method], proof, { value }));
 }
 
 function latestDeal(s: State): DealRecord {
@@ -61,6 +61,12 @@ const FRIENDLY: Record<string, string> = {
   OverTarget: "Already paid, or this would go over the group target.",
   NotRefundable: "Refunds open only if the group fails or delivery doesn't happen in time.",
   NothingToRefund: "Nothing to refund.",
+  NotFarmer: "Only the farmer can mark the harvest delivered.",
+  NotBuyerOrCoordinator: "Only a buyer in this deal or the barangay coordinator can confirm receipt.",
+  NotBuyer: "Only a buyer in this deal can raise a dispute.",
+  TooEarly: "The buyers' confirm window is still open.",
+  ProofAlreadyUsed: "Nagamit na ang resibong ito (blocked by the smart contract).",
+  BadParams: "Invalid request.",
 };
 
 function errorMessage(err: unknown): string {
@@ -109,7 +115,8 @@ async function runDealMaker(s: State, scenario: "success" | "fail"): Promise<Dea
         pesoToWei(s.listing.farmerPricePerKg),
         g.totalKg,
         now + fundingWindow,
-        now + fundingWindow + (scenario === "fail" ? 90 : 3 * DAY)
+        now + fundingWindow + (scenario === "fail" ? 90 : 3 * DAY),
+        CONFIRM_WINDOW
       )
     );
     deal.dealId = Number(await c.dealCount());
@@ -126,7 +133,7 @@ async function payNeighbors(s: State, deal: DealRecord): Promise<void> {
   if (kg <= 0) throw new Error("No neighbor orders to pay.");
   const c = escrow(wallet("neighbors"));
   const amountPesos = kg * s.listing.buyerPricePerKg;
-  const txHash = await record(deal, "Neighbors locked their payments", c.joinDeal(deal.dealId, kg, { value: pesoToWei(s.listing.buyerPricePerKg) * BigInt(kg) }));
+  const txHash = await record(deal, "Neighbors locked their payments", c.joinDeal(deal.dealId, kg, METHOD_ID.wallet, NO_PROOF, { value: pesoToWei(s.listing.buyerPricePerKg) * BigInt(kg) }));
   s.payments.push({ who: "neighbors", method: "wallet", amountPesos, txHash, at: new Date().toISOString() });
   addLog(s, `Neighbors locked ₱${amountPesos.toLocaleString()} for ${kg} kg in escrow.`);
 }
@@ -245,7 +252,7 @@ async function handle(s: State, body: Body): Promise<void> {
       }
       if (youPaid(s)) throw new Error("Bayad ka na sa deal na ito.");
       const amountPesos = kg * s.listing.buyerPricePerKg;
-      const txHash = await lockForYou(s, deal, "wallet", null);
+      const txHash = await lockForYou(s, deal, "wallet", NO_PROOF);
       s.payments.push({ who, method: "wallet", amountPesos, txHash, at: new Date().toISOString() });
       addLog(s, `You locked ₱${amountPesos.toLocaleString()} for ${kg} kg in escrow.`);
       return;
@@ -269,11 +276,11 @@ async function handle(s: State, body: Body): Promise<void> {
       if (!check.ok) throw new Error(check.summary_tl);
 
       const refHash = sha256(normalizeRef(check.read?.reference_no));
-      const memo = `BAYANIHAI|GCASH|ref:${refHash.slice(0, 16)}|php:${expected}|deal:${deal.dealId}`;
-      const txHash = await lockForYou(s, deal, "gcash", memo);
+      const proof = "0x" + refHash; // the contract stores it and refuses it a second time
+      const txHash = await lockForYou(s, deal, "gcash", proof);
       s.usedRefs.push(refHash); // only after the lock succeeds
-      s.payments.push({ who: "you", method: "gcash", amountPesos: expected, refMasked: check.refMasked ?? undefined, proof: memo, aiVerified: true, txHash, at: new Date().toISOString() });
-      addLog(s, `GCash ₱${expected.toLocaleString()} verified by AI (ref ${check.refMasked}) and locked in escrow. Receipt fingerprint recorded on-chain.`);
+      s.payments.push({ who: "you", method: "gcash", amountPesos: expected, refMasked: check.refMasked ?? undefined, proof, aiVerified: true, txHash, at: new Date().toISOString() });
+      addLog(s, `GCash ₱${expected.toLocaleString()} verified by AI (ref ${check.refMasked}) and locked in the escrow contract with its receipt fingerprint.`);
       return;
     }
 
@@ -293,20 +300,62 @@ async function handle(s: State, body: Body): Promise<void> {
       const deal = latestDeal(s);
       if (!s.cashPending) throw new Error("No cash payment is waiting for confirmation.");
       const amountPesos = s.cashPending.amountPesos;
-      const memo = `BAYANIHAI|CASH|coordinator:${wallet("coordinator").address.slice(0, 10)}|php:${amountPesos}|deal:${deal.dealId}`;
-      const txHash = await lockForYou(s, deal, "cash", memo);
+      const proof = "0x" + sha256(`cash|${wallet("coordinator").address}|deal:${deal.dealId}|${s.cashPending.at}`);
+      const txHash = await lockForYou(s, deal, "cash", proof);
       s.cashPending = null;
-      s.payments.push({ who: "you", method: "cash", amountPesos, proof: memo, txHash, at: new Date().toISOString() });
+      s.payments.push({ who: "you", method: "cash", amountPesos, proof, txHash, at: new Date().toISOString() });
       addLog(s, `Coordinator confirmed ₱${amountPesos.toLocaleString()} cash. Locked in escrow and recorded on-chain.`);
       return;
     }
 
-    case "confirm": {
+    case "mark-delivered": {
+      // The farmer says the harvest was delivered. The money stays in the escrow until the buyer side confirms.
       const deal = latestDeal(s);
-      const c = escrow(wallet("coordinator"));
-      await record(deal, "Coordinator confirmed delivery", c.confirmDelivery(deal.dealId));
+      await record(deal, "Farmer marked the harvest delivered", escrow(wallet("farmer")).markDelivered(deal.dealId));
+      addLog(s, `${s.listing.farmer} marked the harvest delivered. Buyers have ${CONFIRM_WINDOW / 60} minutes to confirm or report a problem.`);
+      return;
+    }
+
+    case "receive": {
+      // A buyer confirms the produce arrived -> the contract pays the farmer and the hauler.
+      const deal = latestDeal(s);
+      await record(deal, "Buyer confirmed receipt", escrow(wallet("you")).confirmReceived(deal.dealId));
       const d = await readDeal(deal.dealId);
-      addLog(s, `Delivery confirmed. Farmer received ₱${(d.fundedKg * d.farmerPricePerKg).toLocaleString()}, hauler ₱${(d.fundedKg * (d.pricePerKg - d.farmerPricePerKg)).toLocaleString()}.`);
+      addLog(s, `Buyer confirmed receipt. Farmer received ₱${(d.fundedKg * d.farmerPricePerKg).toLocaleString()}, hauler ₱${(d.fundedKg * (d.pricePerKg - d.farmerPricePerKg)).toLocaleString()}.`);
+      return;
+    }
+
+    case "confirm": {
+      // Coordinator confirms receipt for the whole pickup group (same effect as a buyer confirming).
+      const deal = latestDeal(s);
+      await record(deal, "Coordinator confirmed receipt", escrow(wallet("coordinator")).confirmReceived(deal.dealId));
+      const d = await readDeal(deal.dealId);
+      addLog(s, `Coordinator confirmed receipt. Farmer received ₱${(d.fundedKg * d.farmerPricePerKg).toLocaleString()}, hauler ₱${(d.fundedKg * (d.pricePerKg - d.farmerPricePerKg)).toLocaleString()}.`);
+      return;
+    }
+
+    case "dispute": {
+      // A buyer reports the produce did not arrive: the auto-payout is blocked and the coordinator decides.
+      const deal = latestDeal(s);
+      await record(deal, "Buyer reported a problem", escrow(wallet("you")).dispute(deal.dealId));
+      addLog(s, "A buyer reported that the delivery did not arrive. The money stays locked until the coordinator decides.");
+      return;
+    }
+
+    case "resolve": {
+      // Coordinator settles a dispute: pay the farmer, or let the buyers claim refunds.
+      const deal = latestDeal(s);
+      const payFarmer = body.payFarmer === true;
+      await record(deal, payFarmer ? "Coordinator resolved: pay farmer" : "Coordinator resolved: refund buyers", escrow(wallet("coordinator")).resolveDispute(deal.dealId, payFarmer));
+      addLog(s, payFarmer ? "Coordinator checked the delivery: the farmer is paid." : "Coordinator checked the delivery: buyers can now claim refunds.");
+      return;
+    }
+
+    case "claim-window": {
+      // Nobody confirmed or disputed in time: the farmer is paid (anyone can trigger it).
+      const deal = latestDeal(s);
+      await record(deal, "Farmer claimed after the confirm window", escrow(wallet("farmer")).claimAfterWindow(deal.dealId));
+      addLog(s, "No buyer confirmed or disputed in time, so the contract paid the farmer.");
       return;
     }
 

@@ -89,6 +89,10 @@ export default function BuyerApp() {
     cta = { label: <><span className="bh-spinner" /> Hinihintay ang coordinator · cash {peso(state.cashPending.amountPesos)}</>, disabled: true, cls: "ghost" };
   } else if (deal && status === "Open" && !refundable && youKg > 0 && !youPaid) {
     cta = { label: `Magbayad ${peso(youKg * listing.buyerPricePerKg)}`, onClick: () => setPaySheet(true), cls: "pulse" };
+  } else if (deal && status === "Delivered" && youPaid) {
+    cta = { label: "Natanggap ko na ✓", onClick: () => act("receive"), cls: "pulse" };
+  } else if (deal && status === "Disputed") {
+    cta = { label: "May reklamo · hinihintay ang desisyon ng coordinator", disabled: true, cls: "ghost" };
   } else if (deal && refundable && youPaid && !youRefunded) {
     cta = { label: `Kunin ang refund ${peso(deal.youLockedKg * listing.buyerPricePerKg)}`, onClick: () => act("refund"), cls: "pulse" };
   } else if (deal && !you && status === "Open") {
@@ -301,13 +305,14 @@ export default function BuyerApp() {
       title: state.cashPending && !youPaid ? `Cash ${peso(state.cashPending.amountPesos)} · hinihintay ang coordinator` : "Nakalaan na ang bayad mo",
       sub: methodNote ? `${methodNote} · nasa smart contract` : "Nasa smart contract, hindi pa sa magsasaka",
     },
-    { done: status === "Funded" || status === "Released", title: deal?.chain ? `Buo na ang grupo · ${deal.chain.fundedKg} / ${deal.chain.targetKg} kilo` : "Buo na ang grupo", sub: "Papunta na ang truck" },
-    { done: status === "Released", title: `Dumating na ang ${listing.cropName.toLowerCase()}!`, sub: "Kinumpirma ng coordinator, bayad na ang magsasaka" },
+    { done: ["Funded", "Delivered", "Disputed", "Released"].includes(status ?? ""), title: deal?.chain ? `Buo na ang grupo · ${deal.chain.fundedKg} / ${deal.chain.targetKg} kilo` : "Buo na ang grupo", sub: "Nasa escrow ang lahat ng bayad · papunta na ang truck" },
+    { done: ["Delivered", "Disputed", "Released"].includes(status ?? ""), title: "Naihatid na ng magsasaka", sub: "Hindi pa rin nailalabas ang pera hanggang kumpirmahin mo" },
+    { done: status === "Released", title: "Natanggap mo · bayad na ang magsasaka", sub: "Ang smart contract mismo ang nagbayad sa magsasaka at hauler" },
   ];
   const refundView = refundable || status === "Refunded" || youRefunded;
-  const truckAt = status === "Released" ? 100 : status === "Funded" ? 66 : youPaid ? 33 : deal ? 15 : 0;
+  const truckAt = status === "Released" ? 100 : status === "Delivered" || status === "Disputed" ? 90 : status === "Funded" ? 66 : youPaid ? 33 : deal ? 15 : 0;
   const title =
-    status === "Released" ? "Dumating na!" : youRefunded || status === "Refunded" ? "Naibalik ang bayad" : refundable ? "Hindi natuloy ang grupo" : status === "Funded" ? "Papunta na ang ani!" : youPaid ? "Nasa escrow na" : deal ? "Bukas na ang deal" : you ? "Nakasali ka na" : "Wala ka pang order";
+    status === "Released" ? "Natanggap mo na!" : status === "Delivered" ? "Dumating na ba?" : status === "Disputed" ? "May reklamo" : youRefunded || status === "Refunded" ? "Naibalik ang bayad" : refundable ? "Hindi natuloy ang grupo" : status === "Funded" ? "Papunta na ang ani!" : youPaid ? "Nasa escrow na" : deal ? "Bukas na ang deal" : you ? "Nakasali ka na" : "Wala ka pang order";
 
   const trackR = reveal("track", { alignItems: "center", textAlign: "center" });
   const track = (
@@ -343,6 +348,11 @@ export default function BuyerApp() {
 
       <div style={{ flex: 1 }} />
       {mainCta && <button className={`bh-btn bh-st ${mainCta.cls ?? ""}`} style={{ ...st(5), flex: "none" }} disabled={mainCta.disabled} onClick={mainCta.onClick}>{mainCta.label}</button>}
+      {status === "Delivered" && youPaid && !busy && (
+        <button className="bh-btn ghost bh-st" style={{ ...st(6), flex: "none" }} onClick={() => act("dispute")}>
+          May problema? Hindi dumating
+        </button>
+      )}
     </section>
   );
 

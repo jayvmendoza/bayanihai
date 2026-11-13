@@ -73,7 +73,7 @@ export async function GET() {
     // Show the money held for THIS round's deal. (The contract balance can also include deals from rounds that
     // were reset mid-way; that money stays safe and becomes refundable to its buyers after the deadline.)
     const st = state.deal?.chain;
-    state.chain.escrowPesos = st && (st.status === "Open" || st.status === "Funded") ? st.fundedKg * st.pricePerKg : 0;
+    state.chain.escrowPesos = st && ["Open", "Funded", "Delivered", "Disputed"].includes(st.status) ? st.fundedKg * st.pricePerKg : 0;
   } catch (err) {
     state.chain.error = err instanceof Error ? err.message : String(err);
   }

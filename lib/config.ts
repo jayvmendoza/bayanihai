@@ -21,21 +21,22 @@ function hardhatKey(index: number): string {
   return HDNodeWallet.fromPhrase(HARDHAT_MNEMONIC, undefined, `m/44'/60'/0'/0/${index}`).privateKey;
 }
 
-export type Role = "agent" | "coordinator" | "you" | "neighbors";
+export type Role = "agent" | "coordinator" | "you" | "neighbors" | "farmer";
 
 // Local Hardhat account index for each role (#0 deploys, #2 farmer, #3 hauler).
-const ROLE_INDEX: Record<Role, number> = { agent: 1, coordinator: 4, you: 5, neighbors: 6 };
+const ROLE_INDEX: Record<Role, number> = { agent: 1, coordinator: 4, you: 5, neighbors: 6, farmer: 2 };
 const ROLE_ENV: Record<Role, string> = {
   agent: "AGENT_PRIVATE_KEY",
   coordinator: "COORDINATOR_PRIVATE_KEY",
   you: "BUYER_PRIVATE_KEY",
   neighbors: "NEIGHBORS_PRIVATE_KEY",
+  farmer: "FARMER_PRIVATE_KEY",
 };
 
 export function wallet(role: Role): Wallet {
   const key =
     process.env[ROLE_ENV[role]] ||
-    (role !== "agent" ? process.env.DEMO_PRIVATE_KEY : undefined) ||
+    (role !== "agent" && role !== "farmer" ? process.env.DEMO_PRIVATE_KEY : undefined) ||
     (IS_LOCAL ? hardhatKey(ROLE_INDEX[role]) : undefined);
   if (!key) throw new Error(`Missing ${ROLE_ENV[role]} (or DEMO_PRIVATE_KEY) in .env.local`);
   return new Wallet(key, getProvider());
@@ -48,7 +49,8 @@ function addressFor(envName: string, hardhatIndex: number): string {
   throw new Error(`Missing ${envName} in .env.local`);
 }
 
-export const farmerAddress = () => addressFor("FARMER_ADDRESS", 2);
+// The farmer signs "delivered" with their own key; without a key we fall back to the configured address.
+export const farmerAddress = () => (process.env.FARMER_PRIVATE_KEY ? new Wallet(process.env.FARMER_PRIVATE_KEY).address : addressFor("FARMER_ADDRESS", 2));
 export const haulerAddress = () => addressFor("HAULER_ADDRESS", 3);
 
 export const pesoToWei = (pesos: number) => BigInt(pesos) * WEI_PER_PESO;

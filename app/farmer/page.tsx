@@ -32,7 +32,10 @@ export default function FarmerApp() {
   const crop = listing.crop;
   const status = deal?.chain?.status;
   const refundable = !!deal?.chain?.refundable;
-  const dealActive = (status === "Open" && !refundable) || status === "Funded";
+  const dealActive = (status === "Open" && !refundable) || status === "Funded" || status === "Delivered" || status === "Disputed";
+  const confirmBy = deal?.chain?.confirmBy ?? 0;
+  const secsLeft = Math.max(0, confirmBy - state.chain.now);
+  const windowOver = status === "Delivered" && confirmBy > 0 && secsLeft === 0;
   const failed = status === "Refunded" || (status === "Open" && refundable);
   const p = progressOf(state);
   const pct = p.target ? Math.min(100, Math.round((p.value / p.target) * 100)) : 0;
@@ -45,12 +48,14 @@ export default function FarmerApp() {
 
   let groupLine = `${p.buyers} kapitbahay ang sumali · ${p.value} / ${p.target} kg`;
   if (deal?.chain && status === "Open" && !refundable) groupLine = `Nagbabayad na ang mga mamimili · ${funded} / ${kgTotal} kg`;
-  if (status === "Funded" || status === "Released") groupLine = `Buo na ang grupo · ${kgTotal} kg`;
+  if (status === "Funded" || status === "Delivered" || status === "Disputed" || status === "Released") groupLine = `Buo na ang grupo · ${kgTotal} kg`;
   if (failed) groupLine = "Hindi napuno ang grupo bago ang deadline";
 
   let safe = { title: "Wala pang nakalaang bayad", text: "Lalabas dito kapag nagbayad na ang mga mamimili." };
   if (status === "Open" && funded > 0 && !refundable) safe = { title: `Nakalaan na ang ${peso(funded * listing.buyerPricePerKg)}`, text: "Nasa smart contract. Hinihintay pang mapuno ang grupo." };
-  if (status === "Funded") safe = { title: "Buo na ang bayad sa escrow", text: "Matatanggap mo pagdating ng ani sa mamimili." };
+  if (status === "Funded") safe = { title: "Buo na ang bayad sa escrow", text: "Ihatid ang ani, tapos pindutin ang \"Naihatid ko na\"." };
+  if (status === "Delivered") safe = { title: "Naihatid mo na · hinihintay ang mamimili", text: windowOver ? "Walang nag-confirm o nagreklamo. Puwede mo nang kunin ang bayad." : `Kukumpirmahin ng mamimili. Kung walang sasagot sa loob ng ${secsLeft}s, makukuha mo ang bayad.` };
+  if (status === "Disputed") safe = { title: "May reklamo ang mamimili", text: "Nakalock pa ang pera. Ang barangay coordinator ang magdedesisyon." };
   if (status === "Released" && deal) safe = { title: `Bayad na! ${peso(deal.farmerReceived)}`, text: "Naipadala na ng smart contract sa wallet mo." };
   if (failed) safe = { title: "Naibalik sa mga mamimili", text: "Walang nadaya. Subukan ulit sa susunod na ani." };
 
@@ -130,6 +135,16 @@ export default function FarmerApp() {
         </div>
       </div>
 
+      {status === "Funded" && (
+        <button className="bh-btn pulse bh-st" style={{ ...st(6), flex: "none" }} disabled={!!busy} onClick={() => act("mark-delivered")}>
+          {busy === "mark-delivered" ? <><span className="bh-spinner" /> Nire-record sa BSC…</> : "🚚 Naihatid ko na"}
+        </button>
+      )}
+      {windowOver && (
+        <button className="bh-btn pulse bh-st" style={{ ...st(6), flex: "none" }} disabled={!!busy} onClick={() => act("claim-window")}>
+          {busy === "claim-window" ? <><span className="bh-spinner" /> Kinukuha ang bayad…</> : "Kunin ang bayad"}
+        </button>
+      )}
       {!dealActive && (
         <button className="bh-btn pulse bh-st" style={{ ...st(6), flex: "none" }} onClick={openSheet}>
           <Icon d={ICONS.plus} /> {status === "Released" || failed ? "Mag-post ng bagong ani" : "Mag-post ng ani"}
@@ -143,11 +158,13 @@ export default function FarmerApp() {
     { done: true, title: `Na-post ang ${kgTotal} kg ng ${listing.cropName.toLowerCase()}`, sub: `${peso(listing.farmerPricePerKg)}/kg para sa iyo · ${listing.priceSource === "gemini" ? "presyo mula sa AI" : "presyo mula sa rules"}` },
     { done: groupFull || !!deal, title: "Sumali ang mga kapitbahay", sub: `${p.buyers} mamimili sa ${deal?.pickup ?? "Brgy. Holy Spirit"}` },
     { done: !!deal, title: deal ? `Ginawa ng AI ang Deal #${deal.dealId} sa BSC` : "AI Deal Maker", sub: state.aiRunning && !deal ? "Sinusuri ng AI ngayon…" : "Hindi kayang galawin ng AI ang pera" },
-    { done: status === "Funded" || status === "Released", title: "Buo na ang bayad sa escrow", sub: "Ligtas sa smart contract hanggang maihatid" },
-    { done: status === "Released", title: "Naihatid · bayad ka na!", sub: deal && status === "Released" ? `${peso(deal.farmerReceived)} sa wallet mo` : "Kumpirmasyon ng barangay coordinator" },
+    { done: ["Funded", "Delivered", "Disputed", "Released"].includes(status ?? ""), title: "Buo na ang bayad sa escrow", sub: "Ligtas sa smart contract hanggang maihatid" },
+    { done: ["Delivered", "Disputed", "Released"].includes(status ?? ""), title: "Naihatid mo ang ani", sub: "Nakalock pa rin ang pera hanggang kumpirmahin ng mamimili" },
+    { done: status === "Released", title: "Kinumpirma ng mamimili · bayad ka na!", sub: deal && status === "Released" ? `${peso(deal.farmerReceived)} sa wallet mo` : status === "Disputed" ? "May reklamo · desisyon ng coordinator" : "O kusang mabayaran kung walang reklamo" },
   ];
-  const truckAt = status === "Released" ? 100 : status === "Funded" ? 66 : deal ? 33 : 0;
-  const title = status === "Released" ? "Bayad ka na!" : failed ? "Hindi natuloy" : status === "Funded" ? "Ihanda ang ani!" : deal ? "May deal na!" : "Nag-iipon ng mamimili";
+  const truckAt = status === "Released" ? 100 : status === "Delivered" || status === "Disputed" ? 90 : status === "Funded" ? 66 : deal ? 33 : 0;
+  const title =
+    status === "Released" ? "Bayad ka na!" : failed ? "Hindi natuloy" : status === "Disputed" ? "May reklamo" : status === "Delivered" ? "Hinihintay ang mamimili" : status === "Funded" ? "Ihatid na ang ani!" : deal ? "May deal na!" : "Nag-iipon ng mamimili";
 
   const bayadR = reveal("bayad", { alignItems: "center", textAlign: "center" });
   const bayad = (

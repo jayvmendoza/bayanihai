@@ -1,7 +1,7 @@
 {
   "network": "bscTestnet",
   "chainId": 97,
-  "address": "0xFD20336648aF1fEA94649d8F889925De01B11b25",
+  "address": "0xaDE4975e93a5c1b7ac5A10b4e99CCfFb43E1703A",
   "agent": "0x1553fCa402007DFCbA88f73e2cEF4f5B6747f3a0",
   "abi": [
     {
@@ -32,7 +32,22 @@
     },
     {
       "inputs": [],
+      "name": "NotBuyer",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotBuyerOrCoordinator",
+      "type": "error"
+    },
+    {
+      "inputs": [],
       "name": "NotCoordinator",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NotFarmer",
       "type": "error"
     },
     {
@@ -48,6 +63,16 @@
     {
       "inputs": [],
       "name": "OverTarget",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ProofAlreadyUsed",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "TooEarly",
       "type": "error"
     },
     {
@@ -104,6 +129,63 @@
           "internalType": "uint256",
           "name": "dealId",
           "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "confirmBy",
+          "type": "uint256"
+        }
+      ],
+      "name": "Delivered",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "dealId",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "paidFarmer",
+          "type": "bool"
+        }
+      ],
+      "name": "DisputeResolved",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "dealId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "by",
+          "type": "address"
+        }
+      ],
+      "name": "Disputed",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "dealId",
+          "type": "uint256"
         }
       ],
       "name": "Funded",
@@ -135,9 +217,40 @@
           "internalType": "uint256",
           "name": "amount",
           "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "enum BayanihaiEscrow.Method",
+          "name": "method",
+          "type": "uint8"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "proof",
+          "type": "bytes32"
         }
       ],
       "name": "Joined",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "dealId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "by",
+          "type": "address"
+        }
+      ],
+      "name": "ReceiptConfirmed",
       "type": "event"
     },
     {
@@ -211,6 +324,19 @@
           "type": "uint256"
         }
       ],
+      "name": "claimAfterWindow",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "dealId",
+          "type": "uint256"
+        }
+      ],
       "name": "claimRefund",
       "outputs": [],
       "stateMutability": "nonpayable",
@@ -224,7 +350,7 @@
           "type": "uint256"
         }
       ],
-      "name": "confirmDelivery",
+      "name": "confirmReceived",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -269,6 +395,11 @@
         {
           "internalType": "uint256",
           "name": "deliveryDeadline",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "confirmWindow",
           "type": "uint256"
         }
       ],
@@ -352,12 +483,35 @@
           "type": "uint256"
         },
         {
+          "internalType": "uint256",
+          "name": "confirmWindow",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "deliveredAt",
+          "type": "uint256"
+        },
+        {
           "internalType": "enum BayanihaiEscrow.Status",
           "name": "status",
           "type": "uint8"
         }
       ],
       "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "dealId",
+          "type": "uint256"
+        }
+      ],
+      "name": "dispute",
+      "outputs": [],
+      "stateMutability": "nonpayable",
       "type": "function"
     },
     {
@@ -390,6 +544,16 @@
           "internalType": "uint256",
           "name": "kg",
           "type": "uint256"
+        },
+        {
+          "internalType": "enum BayanihaiEscrow.Method",
+          "name": "method",
+          "type": "uint8"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "proof",
+          "type": "bytes32"
         }
       ],
       "name": "joinDeal",
@@ -419,6 +583,56 @@
         }
       ],
       "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "dealId",
+          "type": "uint256"
+        }
+      ],
+      "name": "markDelivered",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "name": "proofUsed",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "dealId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "payFarmer",
+          "type": "bool"
+        }
+      ],
+      "name": "resolveDispute",
+      "outputs": [],
+      "stateMutability": "nonpayable",
       "type": "function"
     }
   ]

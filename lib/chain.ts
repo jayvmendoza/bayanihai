@@ -5,7 +5,7 @@ import { Contract, type ContractRunner } from "ethers";
 import { getProvider, IS_LOCAL, WEI_PER_PESO } from "./config";
 import testnetDeployment from "./deployments/bscTestnet.json";
 
-export const STATUS = ["Open", "Funded", "Released", "Refunded"] as const;
+export const STATUS = ["Open", "Funded", "Delivered", "Disputed", "Released", "Refunded"] as const;
 export type DealStatus = (typeof STATUS)[number];
 
 type Deployment = { network: string; chainId: number; address: string; agent: string; abi: unknown[] };
@@ -34,6 +34,8 @@ export type OnChainDeal = {
   farmerPricePerKg: number; // pesos
   fundingDeadline: number; // unix seconds
   deliveryDeadline: number;
+  deliveredAt: number; // 0 until the farmer marks delivered
+  confirmBy: number; // buyers confirm or dispute before this; after it the farmer can claim
   refundable: boolean;
 };
 
@@ -51,6 +53,8 @@ export async function readDeal(dealId: number): Promise<OnChainDeal> {
     farmerPricePerKg: toPeso(d.farmerPricePerKg),
     fundingDeadline: Number(d.fundingDeadline),
     deliveryDeadline: Number(d.deliveryDeadline),
+    deliveredAt: Number(d.deliveredAt),
+    confirmBy: Number(d.deliveredAt) > 0 ? Number(d.deliveredAt) + Number(d.confirmWindow) : 0,
     refundable: await c.isRefundable(dealId),
   };
 }

@@ -229,7 +229,7 @@ export default function DemoPage() {
             <figcaption>Mamimili <span>· Buyer</span></figcaption>
           </figure>
           <figure>
-            <div className="frame"><iframe src="/farmer?embed=1" title="Farmer app" /></div>
+            <div className="frame bezel"><iframe src="/farmer?embed=1" title="Farmer app" /></div>
             <figcaption>Magsasaka <span>· Farmer</span></figcaption>
           </figure>
         </section>

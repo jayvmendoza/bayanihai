@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { EXPLORER_URL, IS_LOCAL, wallet } from "@/lib/config";
 import { chainNow, escrow, escrowBalancePesos, loadDeployment, readDeal } from "@/lib/chain";
-import { groupByPickup, readState } from "@/lib/store";
+import { groupByPickup, readState, storeInUse } from "@/lib/store";
 import { CROPS } from "@/lib/listing";
 import type { AppState, DealView } from "@/lib/types";
 
@@ -69,5 +69,5 @@ export async function GET() {
     state.chain.error = err instanceof Error ? err.message : String(err);
   }
 
-  return NextResponse.json(state);
+  return NextResponse.json({ ...state, store: storeInUse() });
 }

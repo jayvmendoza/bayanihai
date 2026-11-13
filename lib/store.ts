@@ -77,10 +77,21 @@ function seed(listing: Listing = DEFAULT_LISTING): State {
 // ---------- persistence ----------
 // Vercel can't keep files between requests, so with an Upstash Redis store (env vars from the Vercel
 // integration) the state lives in Redis. Locally it stays in data/state.json, as before.
-const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+// The Vercel integration may add a custom prefix (e.g. STORAGE_KV_REST_API_URL), so match by suffix.
+function envBySuffix(...suffixes: string[]): string | undefined {
+  for (const suffix of suffixes) {
+    const key = Object.keys(process.env).find((k) => k === suffix || k.endsWith(`_${suffix}`));
+    if (key && process.env[key]) return process.env[key];
+  }
+  return undefined;
+}
+const REDIS_URL = envBySuffix("KV_REST_API_URL", "UPSTASH_REDIS_REST_URL");
+const REDIS_TOKEN = envBySuffix("KV_REST_API_TOKEN", "UPSTASH_REDIS_REST_TOKEN");
 const REDIS_KEY = "bayanihai:state";
 export const STORE_KIND: "redis" | "file" = REDIS_URL && REDIS_TOKEN ? "redis" : "file";
+
+/** Which storage is actually in use right now (shown in /api/state for troubleshooting). */
+export const storeInUse = (): "redis" | "file" | "memory" => (STORE_KIND === "redis" ? "redis" : readOnlyDisk ? "memory" : "file");
 
 async function redis(command: unknown[]): Promise<unknown> {
   const res = await fetch(REDIS_URL!, {

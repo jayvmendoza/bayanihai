@@ -68,7 +68,7 @@ export function CropArt({ crop, size = 150 }: { crop: string; size?: number }) {
   );
 }
 
-export function LockIcon({ color = "#E9B949", size = 32 }: { color?: string; size?: number }) {
+export function LockIcon({ color = "#8FD3A8", size = 32 }: { color?: string; size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <rect x="4" y="11" width="16" height="10" rx="2" />

@@ -55,9 +55,11 @@ On **/demo**:
 2. **Join with 5 kg** (or tap **Sumali** on the buyer phone). The group is now 150 kg.
 3. **Run AI Deal Maker** again. **CREATE DEAL** for Holy Spirit, and the AI wallet creates Deal #N on-chain. Poblacion (40 kg) still waits.
 4. **You pay**, then **Neighbors pay**. The money is locked in escrow, and the farmer phone shows *"Nakalaan na ang bayad"*.
-5. **Coordinator confirms delivery**. The farmer gets ₱6,750, the hauler ₱3,750, and the escrow is back to ₱0.
+5. **Coordinator confirms delivery**. With the default carrots listing (₱40/kg to the farmer, ₱65/kg for buyers), the farmer gets ₱6,000, the hauler ₱3,750, and the escrow is back to ₱0.
 
-Refund story: **Reset demo**, then **Join**, then **Run (refund scenario: 90s deadline)**, then **You pay** only, then **Fast-forward 3 min**, then **Claim refunds**. The buyer gets ₱350 back.
+The console highlights the **Next** step and shows a status bar while an action runs; buttons stay locked until it finishes, so wait for it before clicking again.
+
+Refund story: **Reset demo**, then **Join**, then **Run refund scenario (90s deadline)**, then **You pay** only, then **Fast-forward 3 min**, then **Claim refunds**. The buyer gets ₱325 back (5 kg × ₱65).
 
 ## Turn on Gemini (the real AI review)
 

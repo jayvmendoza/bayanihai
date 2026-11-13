@@ -9,6 +9,7 @@ const BUSY_TEXT: Record<string, string> = {
   "post-harvest": "Posting the harvest…",
   order: "Joining the group…",
   "deal-maker": "AI Deal Maker is reviewing the groups…",
+  "set-scenario": "Updating the next deal…",
   pay: "Locking payment in the escrow contract…",
   confirm: "Releasing payment on-chain…",
   "fast-forward": "Fast-forwarding the chain clock…",
@@ -139,10 +140,18 @@ export default function DemoPage() {
           </StepCard>
 
           <StepCard s={stepState(2)} n={2} title="AI Deal Maker" tag="AI → BSC">
-            <p>Rules check the math, Gemini decides and explains, then the AI wallet creates the deal on-chain.</p>
+            <p>
+              <b>Runs automatically</b> when a buyer joins: rules check the math, Gemini decides and explains, the AI wallet creates the deal on-chain, and the
+              neighbors&apos; pre-orders pay in. The buttons below are manual overrides.
+            </p>
+            {state.aiRunning && (
+              <div className="review"><span className="spinner" /> <b>AI Deal Maker is running automatically…</b></div>
+            )}
             <div className="row">
-              {b("deal-maker", "Run AI Deal Maker", { scenario: "success" }, current === 2 ? "btn primary" : "btn")}
-              {b("deal-maker", "Run refund scenario (90s deadline)", { scenario: "fail" })}
+              {b("deal-maker", "Run AI Deal Maker now", { scenario: "success" })}
+              {state.refundTestArmed
+                ? b("set-scenario", "Refund test armed ✓ (tap to turn off)", { scenario: "success" }, "btn warn")
+                : b("set-scenario", "Arm refund test (next deal: 90s deadline)", { scenario: "fail" })}
             </div>
             {state.groups.map((g) =>
               g.review ? (

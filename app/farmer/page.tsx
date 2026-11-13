@@ -142,7 +142,7 @@ export default function FarmerApp() {
   const steps = [
     { done: true, title: `Na-post ang ${kgTotal} kg ng ${listing.cropName.toLowerCase()}`, sub: `${peso(listing.farmerPricePerKg)}/kg para sa iyo · ${listing.priceSource === "gemini" ? "presyo mula sa AI" : "presyo mula sa rules"}` },
     { done: groupFull || !!deal, title: "Sumali ang mga kapitbahay", sub: `${p.buyers} mamimili sa ${deal?.pickup ?? "Brgy. Holy Spirit"}` },
-    { done: !!deal, title: deal ? `Ginawa ng AI ang Deal #${deal.dealId} sa BSC` : "AI Deal Maker", sub: "Hindi kayang galawin ng AI ang pera" },
+    { done: !!deal, title: deal ? `Ginawa ng AI ang Deal #${deal.dealId} sa BSC` : "AI Deal Maker", sub: state.aiRunning && !deal ? "Sinusuri ng AI ngayon…" : "Hindi kayang galawin ng AI ang pera" },
     { done: status === "Funded" || status === "Released", title: "Buo na ang bayad sa escrow", sub: "Ligtas sa smart contract hanggang maihatid" },
     { done: status === "Released", title: "Naihatid · bayad ka na!", sub: deal && status === "Released" ? `${peso(deal.farmerReceived)} sa wallet mo` : "Kumpirmasyon ng barangay coordinator" },
   ];

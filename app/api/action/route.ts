@@ -1,11 +1,11 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import { PRESENTER_COOKIE, isPresenterOnly, presenterToken } from "@/lib/presenter";
 import { createHash } from "crypto";
 import { farmerAddress, haulerAddress, pesoToWei, wallet } from "@/lib/config";
 import { chainNow, escrow, fastForward, readDeal } from "@/lib/chain";
 import { checkReceipt, normalizeRef, reviewGroup, suggestPrice } from "@/lib/ai";
 import { CROPS, type CropKey } from "@/lib/listing";
-import { addLog, groupByPickup, readState, resetState, writeState, type DealRecord, type PayMethod, type State } from "@/lib/store";
+import { addLog, aiRunning, groupByPickup, readState, resetState, writeState, type DealRecord, type PayMethod, type State } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 // Gemini + waiting for a BSC block can take a while; give the serverless function room on Vercel.
@@ -26,9 +26,8 @@ async function record(deal: DealRecord, label: string, sent: Promise<{ hash: str
 const sha256 = (x: string) => createHash("sha256").update(x).digest("hex");
 const METHOD_TL: Record<PayMethod, string> = { gcash: "GCash", cash: "cash", wallet: "crypto wallet" };
 
-async function youPaidOnChain(deal: DealRecord): Promise<boolean> {
-  return Number(await escrow().kgOf(deal.dealId, wallet("you").address)) > 0;
-}
+/** The buyer's own payment for this round (each payment record is backed by its own on-chain transaction). */
+const youPaid = (s: State) => s.payments.some((p) => p.who === "you");
 
 /**
  * Locks the buyer's share in the escrow contract. For GCash/cash the pesos were paid off-chain, so the
@@ -82,6 +81,88 @@ function errorMessage(err: unknown): string {
   return e?.shortMessage || e?.message || String(err);
 }
 
+/** AI Deal Maker: reviews every open group; for a full group the AI wallet creates the deal on-chain. */
+async function runDealMaker(s: State, scenario: "success" | "fail"): Promise<DealRecord | null> {
+  let created: DealRecord | null = null;
+  const c = escrow(wallet("agent"));
+  // Review all open groups at the same time (Gemini calls can take a few seconds each).
+  const pending = groupByPickup(s.preorders).filter((g) => !s.deals.some((d) => d.pickup === g.pickup));
+  const decisions = await Promise.all(pending.map((g) => reviewGroup(g, s.listing)));
+
+  for (const [i, g] of pending.entries()) {
+    const ai = decisions[i];
+    s.reviews.push({ pickup: g.pickup, totalKg: g.totalKg, buyerCount: g.buyerCount, ai, at: new Date().toISOString() });
+    addLog(s, `AI (${ai.source}) reviewed ${g.pickup}: ${ai.create_deal ? "CREATE DEAL" : "WAIT"}. ${ai.reason}`);
+    if (!ai.create_deal) continue;
+
+    const now = await chainNow();
+    const fundingWindow = scenario === "fail" ? 90 : DAY;
+    const deal: DealRecord = { dealId: 0, pickup: g.pickup, totalKg: g.totalKg, buyerCount: g.buyerCount, youKg: g.youKg, scenario, ai, txs: [] };
+    await record(
+      deal,
+      "AI agent created the deal",
+      c.createDeal(
+        farmerAddress(),
+        haulerAddress(),
+        wallet("coordinator").address,
+        pesoToWei(s.listing.buyerPricePerKg),
+        pesoToWei(s.listing.farmerPricePerKg),
+        g.totalKg,
+        now + fundingWindow,
+        now + fundingWindow + (scenario === "fail" ? 90 : 3 * DAY)
+      )
+    );
+    deal.dealId = Number(await c.dealCount());
+    s.deals.push(deal);
+    created = deal;
+    addLog(s, `Deal #${deal.dealId} created on-chain for ${g.pickup}: ${g.totalKg} kg at ₱${s.listing.buyerPricePerKg}/kg.`);
+  }
+  return created;
+}
+
+/** The neighbors' (simulated) pre-orders pay into the escrow. */
+async function payNeighbors(s: State, deal: DealRecord): Promise<void> {
+  const kg = deal.totalKg - deal.youKg;
+  if (kg <= 0) throw new Error("No neighbor orders to pay.");
+  const c = escrow(wallet("neighbors"));
+  const amountPesos = kg * s.listing.buyerPricePerKg;
+  const txHash = await record(deal, "Neighbors locked their payments", c.joinDeal(deal.dealId, kg, { value: pesoToWei(s.listing.buyerPricePerKg) * BigInt(kg) }));
+  s.payments.push({ who: "neighbors", method: "wallet", amountPesos, txHash, at: new Date().toISOString() });
+  addLog(s, `Neighbors locked ₱${amountPesos.toLocaleString()} for ${kg} kg in escrow.`);
+}
+
+/**
+ * Runs after a buyer joins, in the background (after the response is sent): the AI reviews the groups,
+ * creates the deal on-chain when a group is full, and the simulated neighbors pay. People still do the rest:
+ * the buyer pays, and only the coordinator can release the money.
+ */
+async function autoDeal(round: string): Promise<void> {
+  const before = await readState();
+  if (before.round !== round || !before.autoRun) return;
+  const work: State = structuredClone(before);
+  const scenario = before.nextScenario === "fail" ? "fail" : "success";
+  try {
+    const deal = await runDealMaker(work, scenario);
+    if (deal) {
+      addLog(work, "Auto: neighbors' pre-orders are paying into escrow.");
+      await payNeighbors(work, deal);
+    }
+  } catch (err) {
+    addLog(work, `⚠ Auto AI Deal Maker: ${errorMessage(err)}`);
+  }
+  // Merge onto the latest state (the buyer may have done something meanwhile); drop it if the round changed.
+  const now = await readState();
+  if (now.round !== round) return;
+  now.reviews = work.reviews;
+  now.deals = work.deals;
+  now.payments = [...now.payments, ...work.payments.filter((p) => !now.payments.some((q) => q.txHash === p.txHash))];
+  const fresh = work.log.filter((l) => !before.log.some((b) => b.at === l.at && b.text === l.text));
+  now.log = [...fresh, ...now.log].slice(0, 40);
+  now.autoRun = null;
+  if (scenario === "fail") now.nextScenario = null; // the refund test applies to one deal only
+  await writeState(now);
+}
+
 async function handle(s: State, body: Body): Promise<void> {
   switch (body.action) {
     case "reset": {
@@ -129,43 +210,26 @@ async function handle(s: State, body: Body): Promise<void> {
       s.preorders = s.preorders.filter((o) => !o.isYou);
       s.preorders.push({ id: "you", name: "Ikaw", pickup: PICKUP, kg, isYou: true });
       addLog(s, `You joined ${PICKUP} with ${kg} kg (no payment yet).`);
+      // Automatic: the AI Deal Maker reviews the groups right away, in the background.
+      if (!aiRunning(s)) {
+        s.autoRun = { at: new Date().toISOString() };
+        addLog(s, "AI Deal Maker started automatically.");
+        const round = s.round;
+        after(() => autoDeal(round));
+      }
+      return;
+    }
+
+    case "set-scenario": {
+      // Presenter: make the NEXT automatic deal a refund test (90-second deadline).
+      s.nextScenario = body.scenario === "fail" ? "fail" : null;
+      addLog(s, s.nextScenario ? "Refund test armed: the next deal gets a 90-second deadline." : "Refund test turned off.");
       return;
     }
 
     case "deal-maker": {
-      const scenario = body.scenario === "fail" ? "fail" : "success";
-      const c = escrow(wallet("agent"));
-      // Review all open groups at the same time (Gemini calls can take a few seconds each).
-      const pending = groupByPickup(s.preorders).filter((g) => !s.deals.some((d) => d.pickup === g.pickup));
-      const decisions = await Promise.all(pending.map((g) => reviewGroup(g, s.listing)));
-
-      for (const [i, g] of pending.entries()) {
-        const ai = decisions[i];
-        s.reviews.push({ pickup: g.pickup, totalKg: g.totalKg, buyerCount: g.buyerCount, ai, at: new Date().toISOString() });
-        addLog(s, `AI (${ai.source}) reviewed ${g.pickup}: ${ai.create_deal ? "CREATE DEAL" : "WAIT"}. ${ai.reason}`);
-        if (!ai.create_deal) continue;
-
-        const now = await chainNow();
-        const fundingWindow = scenario === "fail" ? 90 : DAY;
-        const deal: DealRecord = { dealId: 0, pickup: g.pickup, totalKg: g.totalKg, buyerCount: g.buyerCount, youKg: g.youKg, scenario, ai, txs: [] };
-        await record(
-          deal,
-          "AI agent created the deal",
-          c.createDeal(
-            farmerAddress(),
-            haulerAddress(),
-            wallet("coordinator").address,
-            pesoToWei(s.listing.buyerPricePerKg),
-            pesoToWei(s.listing.farmerPricePerKg),
-            g.totalKg,
-            now + fundingWindow,
-            now + fundingWindow + (scenario === "fail" ? 90 : 3 * DAY)
-          )
-        );
-        deal.dealId = Number(await c.dealCount());
-        s.deals.push(deal);
-        addLog(s, `Deal #${deal.dealId} created on-chain for ${g.pickup}: ${g.totalKg} kg at ₱${s.listing.buyerPricePerKg}/kg.`);
-      }
+      if (aiRunning(s)) throw new Error("The AI Deal Maker is already running (it starts automatically when a buyer joins).");
+      await runDealMaker(s, body.scenario === "fail" ? "fail" : "success");
       return;
     }
 
@@ -174,16 +238,16 @@ async function handle(s: State, body: Body): Promise<void> {
       const who = body.who === "neighbors" ? "neighbors" : "you";
       const kg = who === "you" ? deal.youKg : deal.totalKg - deal.youKg;
       if (kg <= 0) throw new Error(who === "you" ? "You didn't join this group." : "No neighbor orders to pay.");
-      const amountPesos = kg * s.listing.buyerPricePerKg;
-      let txHash: string;
-      if (who === "you") {
-        txHash = await lockForYou(s, deal, "wallet", null);
-      } else {
-        const c = escrow(wallet("neighbors"));
-        txHash = await record(deal, "Neighbors locked their payments", c.joinDeal(deal.dealId, kg, { value: pesoToWei(s.listing.buyerPricePerKg) * BigInt(kg) }));
+      if (who === "neighbors") {
+        if (s.payments.some((p) => p.who === "neighbors")) throw new Error("The neighbors already paid.");
+        await payNeighbors(s, deal);
+        return;
       }
+      if (youPaid(s)) throw new Error("Bayad ka na sa deal na ito.");
+      const amountPesos = kg * s.listing.buyerPricePerKg;
+      const txHash = await lockForYou(s, deal, "wallet", null);
       s.payments.push({ who, method: "wallet", amountPesos, txHash, at: new Date().toISOString() });
-      addLog(s, `${who === "you" ? "You" : "Neighbors"} locked ₱${amountPesos.toLocaleString()} for ${kg} kg in escrow.`);
+      addLog(s, `You locked ₱${amountPesos.toLocaleString()} for ${kg} kg in escrow.`);
       return;
     }
 
@@ -191,7 +255,7 @@ async function handle(s: State, body: Body): Promise<void> {
       // Buyer paid with GCash and uploads the receipt. The AI reads it, the rules decide, then the escrow is funded.
       const deal = latestDeal(s);
       if (deal.youKg <= 0) throw new Error("You didn't join this group.");
-      if (await youPaidOnChain(deal)) throw new Error("Bayad ka na sa deal na ito.");
+      if (youPaid(s)) throw new Error("Bayad ka na sa deal na ito.");
       const m = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(body.image ?? "");
       if (!m) throw new Error("Mag-upload ng larawan ng resibo (PNG o JPG).");
       if (m[2].length > 4_000_000) throw new Error("Masyadong malaki ang larawan.");
@@ -217,7 +281,7 @@ async function handle(s: State, body: Body): Promise<void> {
       // Buyer will hand cash to the barangay coordinator. Nothing moves on-chain until the coordinator confirms.
       const deal = latestDeal(s);
       if (deal.youKg <= 0) throw new Error("You didn't join this group.");
-      if (await youPaidOnChain(deal)) throw new Error("Bayad ka na sa deal na ito.");
+      if (youPaid(s)) throw new Error("Bayad ka na sa deal na ito.");
       const amountPesos = deal.youKg * s.listing.buyerPricePerKg;
       s.cashPending = { amountPesos, at: new Date().toISOString() };
       addLog(s, `You chose to pay ₱${amountPesos.toLocaleString()} in cash to the barangay coordinator.`);

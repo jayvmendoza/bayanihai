@@ -6,7 +6,7 @@
 export const PRESENTER_COOKIE = "bayanihai_presenter";
 
 /** Actions only the presenter console may trigger. Buyer/farmer phone actions stay open. */
-export const PRESENTER_ONLY = new Set(["reset", "deal-maker", "confirm", "fast-forward", "cash-received"]);
+export const PRESENTER_ONLY = new Set(["reset", "deal-maker", "confirm", "fast-forward", "cash-received", "set-scenario"]);
 
 export function isPresenterOnly(action: string, who?: string): boolean {
   return PRESENTER_ONLY.has(action) || (action === "pay" && who === "neighbors");

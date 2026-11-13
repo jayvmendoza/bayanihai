@@ -79,7 +79,12 @@ export default function BuyerApp() {
       cls: "pulse",
     };
   } else if (you && !deal) {
-    cta = { label: <><span className="bh-spinner" /> Hinihintay ang AI Deal Maker…</>, disabled: true, cls: "ghost" };
+    const hsReview = state.groups.find((g) => g.pickup === PICKUP)?.review;
+    cta = state.aiRunning
+      ? { label: <><span className="bh-spinner" /> Sinusuri ng AI ang grupo…</>, disabled: true, cls: "ghost" }
+      : hsReview && !hsReview.ai.create_deal
+        ? { label: "Kulang pa ang grupo · hinihintay ang ibang sasali", disabled: true, cls: "ghost" }
+        : { label: <><span className="bh-spinner" /> Hinihintay ang AI Deal Maker…</>, disabled: true, cls: "ghost" };
   } else if (deal && status === "Open" && !refundable && youKg > 0 && !youPaid && state.cashPending) {
     cta = { label: <><span className="bh-spinner" /> Hinihintay ang coordinator · cash {peso(state.cashPending.amountPesos)}</>, disabled: true, cls: "ghost" };
   } else if (deal && status === "Open" && !refundable && youKg > 0 && !youPaid) {
@@ -290,7 +295,7 @@ export default function BuyerApp() {
   // ---------------------------------------------------------------- escrow tracker (Bayad)
   const steps = [
     { done: !!you, title: you ? `Sumali ka · ${youKg} kilo` : "Sumali sa grupo", sub: "Wala pang bayad hanggang may deal" },
-    { done: !!deal, title: deal ? `Ginawa ng AI ang Deal #${deal.dealId} sa BSC` : "AI Deal Maker", sub: deal ? "Gumagawa lang ng deal ang AI, hindi humahawak ng pera" : "Sinusuri ng AI kung sapat na ang grupo" },
+    { done: !!deal, title: deal ? `Ginawa ng AI ang Deal #${deal.dealId} sa BSC` : "AI Deal Maker", sub: deal ? "Gumagawa lang ng deal ang AI, hindi humahawak ng pera" : state.aiRunning ? "Sinusuri ng AI ngayon (awtomatiko)…" : "Awtomatikong susuriin ng AI pagsali mo" },
     {
       done: youPaid || status === "Released",
       title: state.cashPending && !youPaid ? `Cash ${peso(state.cashPending.amountPesos)} · hinihintay ang coordinator` : "Nakalaan na ang bayad mo",

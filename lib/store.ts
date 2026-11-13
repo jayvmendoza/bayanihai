@@ -57,7 +57,13 @@ export type State = {
   cashPending: { amountPesos: number; at: string } | null; // buyer chose cash, waiting for the coordinator
   usedRefs: string[]; // sha256 of every accepted receipt reference; kept across resets
   receiptReads: { imageHash: string; read: ReceiptRead }[]; // AI reads by image fingerprint (same image = no new AI call); kept across resets
+  round: string; // changes on every reset/new harvest, so background work from an old round is dropped
+  autoRun: { at: string } | null; // the automatic AI Deal Maker is running in the background
+  nextScenario?: "fail" | null; // presenter armed a refund test for the next deal
 };
+
+/** The automatic AI run is considered alive for 2 minutes (protects against a crashed background job). */
+export const aiRunning = (s: State) => !!s.autoRun && Date.now() - Date.parse(s.autoRun.at) < 120_000;
 
 const FILE = path.join(process.cwd(), "data", "state.json");
 
@@ -86,6 +92,8 @@ function seed(listing: Listing = DEFAULT_LISTING): State {
     cashPending: null,
     usedRefs: [],
     receiptReads: [],
+    round: Math.random().toString(36).slice(2, 10),
+    autoRun: null,
     preorders,
     reviews: [],
     deals: [],
@@ -165,7 +173,7 @@ export async function readState(): Promise<State> {
   const s = await loadRaw();
   // No state yet, or an older one from before Post Harvest existed: start fresh.
   if (!s || !s.listing) return resetState();
-  return { priceSuggestion: null, payments: [], lastReceipt: null, cashPending: null, usedRefs: [], receiptReads: [], ...s } as State;
+  return { priceSuggestion: null, payments: [], lastReceipt: null, cashPending: null, usedRefs: [], receiptReads: [], round: "legacy", autoRun: null, ...s } as State;
 }
 
 /** Fresh demo for the given listing (defaults to the current one, or Mang Ramon's carrots). */

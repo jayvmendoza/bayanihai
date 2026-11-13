@@ -58,18 +58,20 @@ Then open:
 
 ## Demo script (about 2 minutes)
 
-On **/demo**:
+The AI runs **automatically**. People only do what people should do: buy, pay, and confirm delivery.
 
-0. **Farmer posts a harvest.** Pick a crop and size, then **Ask AI for a fair price**. Gemini picks a price inside a fair window (buyers pay less than the market, the farmer earns at least 1.5x the middleman price) and explains it in Tagalog. Then **Post**. You can also do this on the farmer phone (**+ Mag-post ng ani**).
-1. **Run AI Deal Maker** first, before anyone joins. The AI answers **WAIT**: Holy Spirit has 145 kg, but the truck needs 150 kg.
-2. **Join with 5 kg** (or tap **Sumali** on the buyer phone). The group is now 150 kg.
-3. **Run AI Deal Maker** again. **CREATE DEAL** for Holy Spirit, and the AI wallet creates Deal #N on-chain. Poblacion (40 kg) still waits.
-4. **You pay**, then **Neighbors pay**. The money is locked in escrow, and the farmer phone shows *"Nakalaan na ang bayad"*.
-5. **Coordinator confirms delivery**. With the default carrots listing (₱40/kg to the farmer, ₱65/kg for buyers), the farmer gets ₱6,000, the hauler ₱3,750, and the escrow is back to ₱0.
+| # | Who | Action | What happens automatically |
+|---|---|---|---|
+| 0 | Farmer (`/farmer`) | **+ Ani** → pick crop and kilos → **Itanong sa AI** → **I-post** | Gemini picks a fair price inside the rules (buyers pay less than the market, the farmer earns at least 1.5x the middleman) and explains it in Tagalog |
+| 1 | Buyer (`/`) | **Mamimili ako** → Carrots → **Sumali** (5 kg) | The **AI Deal Maker starts by itself**: Holy Spirit reaches 150 kg → **CREATE DEAL**, the AI wallet creates the deal on BNB Smart Chain, and the neighbors' pre-orders pay in (145/150 kg). Poblacion (40 kg) gets **WAIT**. Takes about 15 seconds. |
+| 2 | Buyer | **Magbayad** → **GCash** (upload receipt or **Demo resibo**), **Cash**, or **Crypto wallet** | GCash: the AI reads the receipt, the rules check it, the escrow is funded and the proof is recorded on-chain. The group is now 150/150 (**Funded**). |
+| 3 | Coordinator (`/demo`) | **Coordinator confirms delivery** (and **received cash** if the buyer chose cash) | The contract pays the farmer and the hauler. With the carrots listing at ₱40/₱65: farmer ₱6,000, hauler ₱3,750, escrow for this deal back to ₱0. |
 
-The console highlights the **Next** step and shows a status bar while an action runs; buttons stay locked until it finishes, so wait for it before clicking again.
+Fraud check: after a round paid with **Demo resibo**, **Reset demo**, join again, and tap **Ulitin ang huling resibo**. The AI rejects it: *"Nagamit na ang resibong ito."*
 
-Refund story: **Reset demo**, then **Join**, then **Run refund scenario (90s deadline)**, then **You pay** only, then **Fast-forward 3 min**, then **Claim refunds**. The buyer gets ₱325 back (5 kg × ₱65).
+Refund story: **Reset demo**, then tap **Arm refund test** in `/demo` (the next deal gets a 90-second deadline). Have the buyer **Sumali** and pay, but don't confirm delivery. After the deadlines pass (about 3 minutes; locally **Fast-forward 3 min**), tap **Claim refunds** or **Kunin ang refund** on the buyer phone.
+
+The `/demo` buttons (**Run AI Deal Maker now**, **Neighbors pay**) are manual overrides in case you want to drive a step yourself.
 
 ## Turn on Gemini (the real AI review)
 

@@ -41,4 +41,6 @@ export type AppState = {
   payments: PaymentRecord[];
   lastReceipt: ReceiptCheck | null;
   cashPending: { amountPesos: number; at: string } | null;
+  aiRunning: boolean; // the AI Deal Maker is reviewing groups right now (runs automatically when a buyer joins)
+  refundTestArmed: boolean; // the next deal will be a refund test (90-second deadline)
 };

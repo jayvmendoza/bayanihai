@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { EXPLORER_URL, IS_LOCAL, wallet } from "@/lib/config";
-import { chainNow, escrow, escrowBalancePesos, loadDeployment, readDeal } from "@/lib/chain";
-import { groupByPickup, readState, storeInUse } from "@/lib/store";
+import { EXPLORER_URL, IS_LOCAL } from "@/lib/config";
+import { chainNow, loadDeployment, readDeal } from "@/lib/chain";
+import { aiRunning, groupByPickup, readState, storeInUse } from "@/lib/store";
 import { CROPS } from "@/lib/listing";
 import type { AppState, DealView } from "@/lib/types";
 
@@ -43,20 +43,22 @@ export async function GET() {
     payments: s.payments,
     lastReceipt: s.lastReceipt,
     cashPending: s.cashPending,
+    aiRunning: aiRunning(s),
+    refundTestArmed: s.nextScenario === "fail",
   };
 
   try {
     if (!deployment) throw new Error("Contract not deployed yet. Run: npm run deploy:local");
     state.chain.now = await chainNow();
-    state.chain.escrowPesos = await escrowBalancePesos();
     state.chain.ok = true;
 
     const record = s.deals.at(-1);
     if (record) {
-      const c = escrow();
       const chain = await readDeal(record.dealId);
-      const youLockedKg = Number(await c.kgOf(record.dealId, wallet("you").address));
-      const neighborsLockedKg = Number(await c.kgOf(record.dealId, wallet("neighbors").address));
+      // On testnet one demo wallet can play both the buyer and the neighbors, so who-paid-what comes from the
+      // payment records (each backed by its own on-chain transaction), not from that shared wallet's balance.
+      const youLockedKg = s.payments.some((p) => p.who === "you") ? record.youKg : 0;
+      const neighborsLockedKg = s.payments.some((p) => p.who === "neighbors") ? record.totalKg - record.youKg : 0;
       const released = chain.status === "Released";
       const deal: DealView = {
         ...record,
@@ -68,6 +70,10 @@ export async function GET() {
       };
       state.deal = deal;
     }
+    // Show the money held for THIS round's deal. (The contract balance can also include deals from rounds that
+    // were reset mid-way; that money stays safe and becomes refundable to its buyers after the deadline.)
+    const st = state.deal?.chain;
+    state.chain.escrowPesos = st && (st.status === "Open" || st.status === "Funded") ? st.fundedKg * st.pricePerKg : 0;
   } catch (err) {
     state.chain.error = err instanceof Error ? err.message : String(err);
   }

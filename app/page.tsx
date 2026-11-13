@@ -9,7 +9,7 @@ export default function BuyerPage() {
   const { state, busy, error, act } = useAppState();
   const [kg, setKg] = useState(5);
 
-  if (!state) return <Stage><Phone><p className="sub">Naglo-load…</p></Phone></Stage>;
+  if (!state) return <Stage><Phone><p className="sub">Naglo-load…</p>{error && <p className="err">{error}</p>}</Phone></Stage>;
 
   const { listing, deal, you } = state;
   const group = state.groups.find((g) => g.pickup === "Brgy. Holy Spirit");

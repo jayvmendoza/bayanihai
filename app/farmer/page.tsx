@@ -13,7 +13,7 @@ export default function FarmerPage() {
   const [crop, setCrop] = useState("carrots");
   const [kg, setKg] = useState(150);
 
-  if (!state) return <Stage><Phone><p className="sub">Naglo-load…</p></Phone></Stage>;
+  if (!state) return <Stage><Phone><p className="sub">Naglo-load…</p>{error && <p className="err">{error}</p>}</Phone></Stage>;
 
   const { listing, deal, priceSuggestion: sug } = state;
   const status = deal?.chain?.status;

@@ -8,7 +8,13 @@ import type { AppState, DealView } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const s = await readState();
+  let s;
+  try {
+    s = await readState();
+  } catch (err) {
+    // e.g. wrong Redis credentials: say so instead of an empty 500, so the screens can show it.
+    return NextResponse.json({ fatal: `Storage error: ${err instanceof Error ? err.message : String(err)}` }, { status: 500 });
+  }
   const deployment = loadDeployment();
   const you = s.preorders.find((o) => o.isYou);
 

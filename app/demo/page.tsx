@@ -39,7 +39,7 @@ export default function DemoPage() {
   if (!state) {
     return (
       <main className="demo">
-        <div className="toast"><span className="spinner" /> Loading…</div>
+        <div className="toast"><span className="spinner" /> {error ?? "Loading…"}</div>
       </main>
     );
   }

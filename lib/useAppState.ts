@@ -11,7 +11,9 @@ export function useAppState(intervalMs = 2000) {
   const refresh = useCallback(async () => {
     try {
       const res = await fetch("/api/state", { cache: "no-store" });
-      setState((await res.json()) as AppState);
+      const data = (await res.json()) as AppState & { fatal?: string };
+      if (data.fatal) setError(data.fatal);
+      else setState(data);
     } catch {
       /* keep last good state */
     }

@@ -94,12 +94,19 @@ async function redis(command: unknown[]): Promise<unknown> {
   return data.result;
 }
 
+// Last resort when there's no Redis and the disk is read-only (a Vercel deploy before Redis is connected):
+// keep the state in this server instance's memory so the app still works. It isn't shared between
+// instances and resets on cold starts, so connect Upstash Redis for a reliable public demo.
+let memory: State | null = null;
+let readOnlyDisk = false;
+
 async function loadRaw(): Promise<Partial<State> | null> {
   if (STORE_KIND === "redis") {
     const raw = await redis(["GET", REDIS_KEY]);
     return typeof raw === "string" ? (JSON.parse(raw) as Partial<State>) : null;
   }
-  if (!fs.existsSync(FILE)) return null;
+  if (readOnlyDisk) return memory;
+  if (!fs.existsSync(FILE)) return memory;
   return JSON.parse(fs.readFileSync(FILE, "utf8")) as Partial<State>;
 }
 
@@ -108,8 +115,15 @@ export async function writeState(state: State): Promise<void> {
     await redis(["SET", REDIS_KEY, JSON.stringify(state)]);
     return;
   }
-  fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(state, null, 2));
+  memory = state;
+  if (readOnlyDisk) return;
+  try {
+    fs.mkdirSync(path.dirname(FILE), { recursive: true });
+    fs.writeFileSync(FILE, JSON.stringify(state, null, 2));
+  } catch (err) {
+    readOnlyDisk = true;
+    console.warn("BAYANIHAI: can't write data/state.json (read-only disk?). Using in-memory state; connect Upstash Redis to share it.", err);
+  }
 }
 
 export async function readState(): Promise<State> {

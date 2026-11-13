@@ -31,6 +31,12 @@ async function main() {
   console.log(`Wrote ${path.relative(process.cwd(), out)}`);
 
   if (network.name === "bscTestnet") {
+    // Public copy the deployed app reads (committed; it holds only the address + ABI).
+    const pub = path.join(__dirname, "..", "lib", "deployments", "bscTestnet.json");
+    fs.mkdirSync(path.dirname(pub), { recursive: true });
+    fs.copyFileSync(out, pub);
+    console.log(`Wrote ${path.relative(process.cwd(), pub)} (commit this so Vercel uses the new contract)`);
+
     // Everything needed for "Verify and Publish" on testnet.bscscan.com (no API key needed).
     const ctorArgs = ethers.AbiCoder.defaultAbiCoder().encode(["address"], [agent]).slice(2);
     const lines = [

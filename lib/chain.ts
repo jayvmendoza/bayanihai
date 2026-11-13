@@ -3,13 +3,17 @@ import fs from "fs";
 import path from "path";
 import { Contract, type ContractRunner } from "ethers";
 import { getProvider, IS_LOCAL, WEI_PER_PESO } from "./config";
+import testnetDeployment from "./deployments/bscTestnet.json";
 
 export const STATUS = ["Open", "Funded", "Released", "Refunded"] as const;
 export type DealStatus = (typeof STATUS)[number];
 
 type Deployment = { network: string; chainId: number; address: string; agent: string; abi: unknown[] };
 
+// Testnet: the committed deployment (bundled at build time, so it works on Vercel).
+// Local Hardhat chain: lib/contract.json, written by `npm run deploy:local` (git-ignored).
 export function loadDeployment(): Deployment | null {
+  if (!IS_LOCAL) return testnetDeployment as Deployment;
   const file = path.join(process.cwd(), "lib", "contract.json");
   if (!fs.existsSync(file)) return null;
   return JSON.parse(fs.readFileSync(file, "utf8")) as Deployment;

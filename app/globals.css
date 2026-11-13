@@ -150,3 +150,14 @@ select.btn { padding-right: 10px; }
 .toast .spinner { color: var(--g300); }
 
 @media (max-width: 1180px) { .layout { grid-template-columns: 1fr; } .phones { position: static; justify-content: center; } }
+
+/* On a real phone (and the installed PWA) the app fills the screen: no drawn phone frame.
+   The /demo iframes add .embed to <body>, so the presenter view keeps its phone frames. */
+@media (max-width: 520px) {
+  body:not(.embed) .stage { padding: 0; min-height: 100dvh; align-items: stretch; background: var(--bg); }
+  body:not(.embed) .phone { width: 100%; height: 100dvh; padding: 0; border-radius: 0; background: var(--bg); box-shadow: none; }
+  body:not(.embed) .screen { border-radius: 0; }
+  body:not(.embed) .notch { display: none; }
+  body:not(.embed) .brand { padding-top: calc(18px + env(safe-area-inset-top)); }
+  body:not(.embed) .body { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+}

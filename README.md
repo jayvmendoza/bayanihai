@@ -103,6 +103,24 @@ Use **test wallets only**.
 Amounts are scaled so ₱1 = 0.000001 tBNB (`WEI_PER_PESO`). A full demo uses about 0.01 tBNB plus gas.
 On testnet there's no fast-forward, so the refund scenario takes about 90 seconds of real waiting.
 
+## Deploy to Vercel (installable PWA)
+
+The app runs on Vercel against the **BSC Testnet** contract above. On a phone, open the link and choose **Install app** / **Add to Home screen**: it opens full-screen with the BAYANIHAI icon.
+
+1. **Import the repo.** vercel.com → sign in with GitHub → **Add New → Project** → import `bayanihai`. Framework: Next.js (auto-detected). Don't deploy yet.
+2. **Add shared storage.** Project → **Storage** → **Upstash Redis** (free) → Create → connect it to the project. Vercel adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` for you. (Vercel can't keep files, so without this the demo state would reset between requests.)
+3. **Environment variables** (Project → Settings → Environment Variables). Same values as your `.env.local`:
+   `GEMINI_API_KEY`, `RPC_URL`, `DEMO_PRIVATE_KEY`, `AGENT_ADDRESS`, `AGENT_PRIVATE_KEY`, `FARMER_ADDRESS`, `HAULER_ADDRESS`, plus a new **`DEMO_PASSWORD`**. `DEPLOYER_PRIVATE_KEY` is not needed on Vercel.
+4. **Deploy.** Then open `https://<your-app>.vercel.app/demo`, log in (any username + `DEMO_PASSWORD`), and click **Reset demo** once.
+
+| Who | URL | Login |
+|---|---|---|
+| Buyer (Mamimili) | `/` | none |
+| Farmer (Magsasaka) | `/farmer` | none |
+| Presenter console | `/demo` | `DEMO_PASSWORD` |
+
+The contract address comes from `lib/deployments/bscTestnet.json` (public: address + ABI only). `npm run deploy:testnet` updates it; commit it after redeploying. Private keys live only in Vercel's environment variables, never in the repo.
+
 ## How it works
 
 ```
@@ -178,13 +196,16 @@ BAYANIHAI uses AI in two separate places: **inside the product** and **while bui
 | `lib/ai.ts` | AI Deal Maker review + AI Fair Pricing (rules + Gemini) |
 | `lib/listing.ts` | Crops, sample market prices, current listing shape |
 | `lib/chain.ts` | Reads deals from the blockchain |
-| `lib/store.ts` | Demo pre-orders and history (`data/state.json`) |
+| `lib/deployments/bscTestnet.json` | Public testnet deployment (address + ABI) used when not on a local chain |
+| `lib/presenter.ts`, `middleware.ts` | Optional `DEMO_PASSWORD` lock for /demo and presenter-only actions |
+| `app/manifest.ts`, `public/sw.js` | PWA: install metadata, icons, offline shell |
+| `lib/store.ts` | Demo pre-orders and history (Upstash Redis on Vercel, `data/state.json` locally) |
 | `app/api/action/route.ts` | Actions: order, deal-maker, pay, confirm, refund |
 | `app/page.tsx`, `app/farmer/page.tsx`, `app/demo/page.tsx` | Buyer, farmer, and presenter screens |
 
 ## Prototype limits (say these honestly to judges)
 
 - Wallets are managed by the server for the demo, so users never see crypto. A production version would use proper custodial or embedded wallets.
-- Pre-orders live in a JSON file. Production would use a database (e.g., Supabase).
+- Demo state is one JSON document (Redis on Vercel, a file locally). Production would use a real database with per-user orders.
 - One farmer (Mang Ramon) and one listing at a time. The four crops use sample market prices.
 - Posting a new harvest starts a fresh demo round, and neighbors' pre-orders are simulated.

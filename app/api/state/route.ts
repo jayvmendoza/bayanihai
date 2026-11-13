@@ -8,7 +8,7 @@ import type { AppState, DealView } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const s = readState();
+  const s = await readState();
   const deployment = loadDeployment();
   const you = s.preorders.find((o) => o.isYou);
 

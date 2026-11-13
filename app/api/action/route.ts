@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { PRESENTER_COOKIE, isPresenterOnly, presenterToken } from "@/lib/presenter";
 import type { ContractTransactionResponse } from "ethers";
 import { farmerAddress, haulerAddress, pesoToWei, wallet } from "@/lib/config";
 import { chainNow, escrow, fastForward, readDeal } from "@/lib/chain";
@@ -7,6 +8,8 @@ import { CROPS, type CropKey } from "@/lib/listing";
 import { addLog, groupByPickup, readState, resetState, writeState, type DealRecord, type State } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
+// Gemini + waiting for a BSC block can take a while; give the serverless function room on Vercel.
+export const maxDuration = 60;
 
 const DAY = 86400;
 const PICKUP = "Brgy. Holy Spirit";
@@ -58,7 +61,7 @@ function errorMessage(err: unknown): string {
 async function handle(s: State, body: Body): Promise<void> {
   switch (body.action) {
     case "reset": {
-      Object.assign(s, resetState());
+      Object.assign(s, await resetState());
       return;
     }
 
@@ -90,7 +93,7 @@ async function handle(s: State, body: Body): Promise<void> {
         priceSource: p.source,
         priceReason: p.reason_tl,
       };
-      Object.assign(s, resetState(listing));
+      Object.assign(s, await resetState(listing));
       addLog(s, `${listing.farmer} posted ${listing.minKg} kg of ${listing.cropName} at ₱${listing.farmerPricePerKg}/kg (buyers pay ₱${listing.buyerPricePerKg}/kg).`);
       return;
     }
@@ -190,17 +193,26 @@ async function handle(s: State, body: Body): Promise<void> {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   const body = (await req.json()) as Body;
-  const s = readState();
+
+  // Public deployment: presenter-only actions need the cookie set by the /demo login (see middleware.ts).
+  const password = process.env.DEMO_PASSWORD;
+  if (password && isPresenterOnly(body.action, body.who)) {
+    if (req.cookies.get(PRESENTER_COOKIE)?.value !== (await presenterToken(password))) {
+      return NextResponse.json({ ok: false, error: "Presenter only: open /demo and log in first." }, { status: 401 });
+    }
+  }
+
+  const s = await readState();
   try {
     await handle(s, body);
-    writeState(s);
+    await writeState(s);
     return NextResponse.json({ ok: true });
   } catch (err) {
     const msg = errorMessage(err);
     addLog(s, `⚠ ${msg}`);
-    writeState(s);
+    await writeState(s);
     return NextResponse.json({ ok: false, error: msg }, { status: 400 });
   }
 }

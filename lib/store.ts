@@ -74,25 +74,56 @@ function seed(listing: Listing = DEFAULT_LISTING): State {
   };
 }
 
-export function readState(): State {
-  if (!fs.existsSync(FILE)) writeState(seed());
-  const s = JSON.parse(fs.readFileSync(FILE, "utf8")) as Partial<State>;
-  // Older state files (before Post Harvest existed) have no listing: start fresh.
-  if (!s.listing) return resetState();
-  return { priceSuggestion: null, ...s } as State;
+// ---------- persistence ----------
+// Vercel can't keep files between requests, so with an Upstash Redis store (env vars from the Vercel
+// integration) the state lives in Redis. Locally it stays in data/state.json, as before.
+const REDIS_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const REDIS_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+const REDIS_KEY = "bayanihai:state";
+export const STORE_KIND: "redis" | "file" = REDIS_URL && REDIS_TOKEN ? "redis" : "file";
+
+async function redis(command: unknown[]): Promise<unknown> {
+  const res = await fetch(REDIS_URL!, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify(command),
+    cache: "no-store",
+  });
+  const data = (await res.json()) as { result?: unknown; error?: string };
+  if (!res.ok || data.error) throw new Error(`Redis: ${data.error ?? res.status}`);
+  return data.result;
 }
 
-export function writeState(state: State): void {
+async function loadRaw(): Promise<Partial<State> | null> {
+  if (STORE_KIND === "redis") {
+    const raw = await redis(["GET", REDIS_KEY]);
+    return typeof raw === "string" ? (JSON.parse(raw) as Partial<State>) : null;
+  }
+  if (!fs.existsSync(FILE)) return null;
+  return JSON.parse(fs.readFileSync(FILE, "utf8")) as Partial<State>;
+}
+
+export async function writeState(state: State): Promise<void> {
+  if (STORE_KIND === "redis") {
+    await redis(["SET", REDIS_KEY, JSON.stringify(state)]);
+    return;
+  }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   fs.writeFileSync(FILE, JSON.stringify(state, null, 2));
 }
 
+export async function readState(): Promise<State> {
+  const s = await loadRaw();
+  // No state yet, or an older one from before Post Harvest existed: start fresh.
+  if (!s || !s.listing) return resetState();
+  return { priceSuggestion: null, ...s } as State;
+}
+
 /** Fresh demo for the given listing (defaults to the current one, or Mang Ramon's carrots). */
-export function resetState(listing?: Listing): State {
-  let current = listing;
-  if (!current && fs.existsSync(FILE)) current = (JSON.parse(fs.readFileSync(FILE, "utf8")) as Partial<State>).listing;
+export async function resetState(listing?: Listing): Promise<State> {
+  const current = listing ?? (await loadRaw())?.listing;
   const s = seed(current ?? DEFAULT_LISTING);
-  writeState(s);
+  await writeState(s);
   return s;
 }
 

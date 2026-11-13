@@ -137,6 +137,37 @@ These rules are enforced by the contract and covered by tests:
 npm run test:contract
 ```
 
+## AI use and decisions
+
+BAYANIHAI uses AI in two separate places: **inside the product** and **while building it**.
+
+### 1. Inside the app: Gemini (the AI Deal Maker)
+
+| Job | What Gemini does | What keeps it safe |
+|---|---|---|
+| **AI Fair Pricing** | Picks one buyer price per kg for the harvest | Rules set the fair window first (buyer ≤ market − ₱5, farmer ≥ 1.5 × middleman). Any answer outside it is clamped. |
+| **Price explanation** | Writes one friendly Tagalog sentence for the farmer | Written *after* clamping, from the final numbers only, so it can't overstate the deal (an earlier version said "triple" for 1.75x, and we fixed that) |
+| **Deal review** | Decides CREATE DEAL or WAIT per pickup point and explains it in English and Tagalog | Final decision = Gemini **AND** the rules. Gemini can never approve a group under the 150 kg truck minimum. |
+| **Creating the deal on-chain** | The AI wallet calls `createDeal()` on BNB Smart Chain | The contract only lets the AI **create** deals. It cannot join, release or refund money (`NotAgent` / `NotCoordinator` checks, covered by tests). |
+
+**Reliability:** three Gemini models (`gemini-3.8-flash`, then `gemini-3.5-flash` and `gemini-3.1-flash-lite` as backups) are asked at once, each with a 20-second timeout, and the first valid answer wins. If all fail, or there's no API key, the rules decide alone, so the demo never stalls. Every review shows a **Gemini** or **Rules only** badge so it's always clear who decided.
+
+### 2. While building: AI coding assistants
+
+- **Claude Code** helped plan, write and review the app, the contract tests and the deploy scripts.
+- **Kimi** (through BCC's `engr` tool, `engr --kimi`) is the event's coding assistant for Build Day.
+- Following the workshop rules: the assistant never received private keys or seed phrases (they stay in `.env.local`, which is git-ignored). Every change was reviewed and tested before commit, and the testnet deploy used dedicated test wallets with no real funds.
+
+### Key decisions
+
+| Decision | Why |
+|---|---|
+| **The AI can create deals but can never move money** | Trust: buyers' money is released only by the coordinator after delivery, or refunded by the contract. Even a wrong or manipulated AI answer can't take funds. |
+| **Rules first, AI second** | The math (150 kg minimum, fair price window) must always be correct. Gemini adds judgment and plain-language explanations on top. |
+| **Gemini in the app, Kimi for coding** | Gemini answers fast in structured JSON and explains in Tagalog, and it was already tested with fallbacks. Kimi is built for coding work, which is what we use it for. |
+| **Escrow with pull refunds** | If a group doesn't fill or delivery never happens, each buyer withdraws their own refund. No one (including us) can redirect it. |
+| **Only IDs, amounts and statuses on-chain** | Names and orders stay off-chain. The blockchain keeps the money trail public without exposing personal data. |
+
 ## Project map
 
 | Path | What it is |
